@@ -1,296 +1,330 @@
-import { useEffect, useRef, useState } from "react";
-import { Button, Form } from "react-bootstrap";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
+import "./ChatBot.css";
 
+/* ─── helpers ────────────────────────────────────────────────────────────── */
+const formatTime = (date) =>
+  date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/* ─── sub-components ─────────────────────────────────────────────────────── */
+
+function TypingIndicator() {
+  return (
+    <div className="cb-typing-row">
+      <div className="cb-msg-avatar">🤖</div>
+      <div className="cb-typing-bubble">
+        <span className="cb-typing-dot" />
+        <span className="cb-typing-dot" />
+        <span className="cb-typing-dot" />
+      </div>
+    </div>
+  );
+}
+
+function MessageRow({ msg, onOptionClick, onWorkflowClick }) {
+  const isUser = msg.sender === "user";
+  const hasButtons =
+    msg.sender === "bot" && msg.node?.config?.nodeType === "buttons";
+
+  return (
+    <div className={`cb-msg-row ${isUser ? "user" : "bot"}`}>
+      {/* Bot avatar */}
+      {!isUser && <div className="cb-msg-avatar">🤖</div>}
+
+      <div className="cb-bubble-wrap">
+        <div className="cb-bubble">{msg.text}</div>
+
+        {/* Timestamp */}
+        <span className="cb-timestamp">{formatTime(msg.time)}</span>
+
+        {/* Option / workflow buttons */}
+        {hasButtons && (
+          <div className="cb-options">
+            {msg.node.config.buttons?.map((btn, idx) => {
+              // Workflow button (has .id)
+              if (btn.id) {
+                return (
+                  <button
+                    key={btn.id}
+                    className="cb-option-btn"
+                    onClick={() => onWorkflowClick(btn)}
+                  >
+                    {btn.name}
+                  </button>
+                );
+              }
+              // Dynamic response button
+              return (
+                <button
+                  key={btn.value + idx}
+                  className="cb-option-btn"
+                  onClick={() => onOptionClick(btn.value)}
+                >
+                  {btn.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* User side spacer (keeps alignment without an avatar) */}
+      {isUser && <div className="cb-msg-avatar-spacer" />}
+    </div>
+  );
+}
+
+/* ─── Send icon SVG ──────────────────────────────────────────────────────── */
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+    </svg>
+  );
+}
+
+/* ─── Main component ─────────────────────────────────────────────────────── */
 export default function ChatBot() {
-  const [client, setClient] = useState(null);
+  const [stompClient, setStompClient] = useState(null);
+  const [connected, setConnected] = useState(false);
   const [message, setMessage] = useState("");
   const [chat, setChat] = useState([]);
   const [currentNode, setCurrentNode] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
+
   const chatEndRef = useRef(null);
+  const inputRef = useRef(null);
 
+  /* ── WebSocket setup ───────────────────────────────────────────────────── */
   useEffect(() => {
-    const stompClient = new Client({
+    const client = new Client({
       webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
-
       reconnectDelay: 5000,
-
-      debug: (msg) => {
-        console.log("STOMP:", msg);
-      },
+      debug: () => {},
 
       onConnect: () => {
-        console.log("Connected");
+        setConnected(true);
 
-        stompClient.subscribe(
-          "/app/chat.init",
-          (response) => {
+        client.subscribe("/app/chat.init", (response) => {
+          const data = JSON.parse(response.body);
+          setSessionId(data.sessionId);
 
-            const data = JSON.parse(response.body);
-
-            console.log("Session ID:", data.sessionId);
-
-            // save session
-            setSessionId(data.sessionId);
-
-
-            // subscribe to session topic
-            stompClient.subscribe(
-              `/topic/chat/${data.sessionId}`,
-              (message) => {
-
-                const responseData = JSON.parse(
-                  message.body
-                );
-
-                console.log("Chat Response:", responseData);
-
-
-                setCurrentNode(responseData);
-
-                setChat((prev) => [
-                  ...prev,
-                  {
-                    sender: "bot",
-                    text: responseData.response,
-                    node: responseData,
-                  },
-                ]);
-
-              }
-            );
-
-
-            if (data.workflows?.length > 0) {
-
-              const node = {
-                ...data.workflows[0],
-                config: {
-                  nodeType: "buttons",
-                  buttons: data.workflows,
-                },
-              };
-
-
-              setCurrentNode(node);
-
-              setChat((prev) => [
-                ...prev,
-                {
-                  sender: "bot",
-                  text: "Please select a workflow to start:",
-                  node,
-                },
-              ]);
-
+          // Subscribe to session topic
+          client.subscribe(`/topic/chat/${data.sessionId}`, (msg) => {
+            const responseData = JSON.parse(msg.body);
+            console.log("Received message:", responseData);
+            if (
+              responseData?.config?.nodeType === "buttons" &&
+              responseData?.response
+            ) {
+              responseData.config.buttons = responseData.response
+                .split("\n")
+                .filter((item) => item.trim())
+                .map((item) => ({ label: item.trim(), value: item.trim() }));
             }
 
+            setCurrentNode(responseData);
+            setIsTyping(false);
+
+            setChat((prev) => [
+              ...prev,
+              {
+                sender: "bot",
+                text:
+                  responseData?.config?.nodeType === "buttons"
+                    ? "Please select an option:"
+                    : responseData.response,
+                node: responseData,
+                time: new Date(),
+              },
+            ]);
+          });
+
+          // Initial workflow list
+          if (data.workflows?.length > 0) {
+            const node = {
+              ...data.workflows[0],
+              config: { nodeType: "buttons", buttons: data.workflows },
+            };
+            setCurrentNode(node);
+            setChat([
+              {
+                sender: "bot",
+                text: "👋 Hi! I'm your assistant. Please select a workflow to get started:",
+                node,
+                time: new Date(),
+              },
+            ]);
           }
-        );
-        // Trigger init if backend expects it
-        stompClient.publish({
-          destination: "/app/chat.init",
-          body: "{}",
         });
 
-
-
-
-
+        client.publish({ destination: "/app/chat.init", body: "{}" });
       },
 
-      onStompError: (frame) => {
-        console.error(
-          "Broker error:",
-          frame.headers["message"]
-        );
-      },
+      onDisconnect: () => setConnected(false),
+      onStompError: () => setConnected(false),
     });
 
-    stompClient.activate();
-    setClient(stompClient);
+    client.activate();
+    setStompClient(client);
 
-    return () => {
-      stompClient.deactivate();
-    };
+    return () => client.deactivate();
   }, []);
 
+  /* ── Auto-scroll ───────────────────────────────────────────────────────── */
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
-  }, [chat]);
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chat, isTyping]);
 
-  const sendMessage = (value) => {
-    console.log("Sending message:", value);
-    if (!client?.connected || !sessionId)
-      return;
-
-    client.publish({
-      destination: "/app/chat.message",
-      body: JSON.stringify({
-        sessionId:currentNode.sessionId,
-        message: value,
+  /* ── Send helpers ──────────────────────────────────────────────────────── */
+  const sendMessage = useCallback(
+    (value) => {
+      if (!stompClient?.connected || !sessionId) return;
+      setIsTyping(true);
+      stompClient.publish({
+        destination: "/app/chat.message",
+        body: JSON.stringify({
+          sessionId: currentNode?.sessionId || sessionId,
+          message: value,
         }),
-    });
-  };
+      });
+    },
+    [stompClient, sessionId, currentNode]
+  );
 
   const handleSend = () => {
     if (!message.trim()) return;
-
-    sendMessage(message);
+    const text = message.trim();
 
     setChat((prev) => [
       ...prev,
-      {
-        sender: "user",
-        text: message,
-      },
+      { sender: "user", text, time: new Date() },
     ]);
-
+    sendMessage(text);
     setMessage("");
+    inputRef.current?.focus();
   };
 
-  const handleButtonClick = (workflow) => {
-    if (!client?.connected || !sessionId)
-      return;
+  const handleOptionClick = (value) => {
+    setChat((prev) => [
+      ...prev,
+      { sender: "user", text: value, time: new Date() },
+    ]);
+    sendMessage(value);
+  };
 
-    client.publish({
+  const handleWorkflowClick = (workflow) => {
+    if (!stompClient?.connected || !sessionId) return;
+    setIsTyping(true);
+
+    stompClient.publish({
       destination: "/app/chat.start",
-      body: JSON.stringify({
-        sessionId: sessionId,
-        workflowId: workflow.id,
-      }),
+      body: JSON.stringify({ sessionId, workflowId: workflow.id }),
     });
 
     setChat((prev) => [
       ...prev,
-      {
-        sender: "user",
-        text: workflow.name,
-      },
+      { sender: "user", text: workflow.name, time: new Date() },
     ]);
   };
 
-  const renderInputArea = () => {
-    // console.log("Current Node:  => renderInputArea => ", currentNode);
-    if (
-      !currentNode ||
-      currentNode?.node?.config?.nodeType !== "input"
-    ) {
-      return null;
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
-
-    return (
-      <>
-        <Form.Control
-          value={message}
-          placeholder={currentNode?.name}
-          onChange={(e) => setMessage(e.target.value)
-          }
-          // onKeyDown={(e) =>
-          //   e.key === "Enter" && handleSend()
-          // }
-        />
-
-        <Button
-          className="mt-2 w-100"
-          onClick={handleSend}
-        >
-          Send
-        </Button>
-      </>
-    );
   };
 
+  /* ── Input visibility ──────────────────────────────────────────────────── */
+  const showInput = currentNode?.node?.config?.nodeType === "input";
+
+  /* ─── Render ───────────────────────────────────────────────────────────── */
   return (
-    <div
-      style={{
-        width: 450,
-        margin: "20px auto",
-        border: "1px solid #ddd",
-        borderRadius: 10,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          height: 500,
-          overflowY: "auto",
-          padding: 15,
-          background: "#fafafa",
-        }}
-      >
-        {chat.map((msg, index) => (
-          <div
-            key={index}
-            style={{
-              textAlign:
-                msg.sender === "user"
-                  ? "right"
-                  : "left",
-              marginBottom: 15,
-            }}
-          >
-            <div
-              style={{
-                padding: 10,
-                borderRadius: 10,
-                display: "inline-block",
-                background:
-                  msg.sender === "user"
-                    ? "#0d6efd"
-                    : "#f1f1f1",
-                color:
-                  msg.sender === "user"
-                    ? "#fff"
-                    : "#000",
-                maxWidth: "75%",
-              }}
-            >
-              {msg.text}
+    <div className="cb-wrapper">
+      <div className="cb-shell">
+
+        {/* ── Header ───────────────────────────────────────────────────── */}
+        <div className="cb-header">
+          <div className="cb-avatar">🤖</div>
+          <div className="cb-header-info">
+            <p className="cb-header-title">AI Assistant</p>
+            <div className="cb-header-status">
+              <span className={`cb-status-dot ${connected ? "" : "offline"}`} />
+              <span className="cb-status-text">
+                {connected ? "Online — ready to help" : "Connecting…"}
+              </span>
             </div>
-
-            {msg.sender === "bot" && msg.node?.config?.nodeType === "buttons" && (
-              <div
-                style={{
-                  marginTop: 10,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                }}
-              >
-                {msg.node.config.buttons?.map(
-                  (btn) => (
-                    <Button
-                      key={btn.name}
-                      size="sm"
-                      variant="outline-primary"
-                      onClick={() =>
-                        handleButtonClick(btn)
-                      }
-                    >
-                      {btn.name}
-                    </Button>
-                  )
-                )}
-              </div>
-            )}
           </div>
-        ))}
-        <div ref={chatEndRef} />
-      </div>
+        </div>
 
-      <div
-        className="p-3"
-        style={{
-          borderTop: "1px solid #ddd",
-          background: "#fff",
-        }}
-      >
-        {renderInputArea()}
+        {/* ── Connecting banner ─────────────────────────────────────────── */}
+        {!connected && (
+          <div className="cb-connecting">
+            <div className="cb-connecting-spinner" />
+            Connecting to server…
+          </div>
+        )}
+
+        {/* ── Messages ─────────────────────────────────────────────────── */}
+        <div className="cb-messages">
+          {chat.length === 0 && (
+            <div className="cb-empty">
+              <span className="cb-empty-icon">💬</span>
+              <p>Start a conversation by selecting a workflow below</p>
+            </div>
+          )}
+
+          {chat.map((msg, index) => (
+            <MessageRow
+              key={index}
+              msg={msg}
+              onOptionClick={handleOptionClick}
+              onWorkflowClick={handleWorkflowClick}
+            />
+          ))}
+
+          {/* Typing indicator */}
+          {isTyping && <TypingIndicator />}
+
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* ── Footer / Input ────────────────────────────────────────────── */}
+        <div className="cb-footer">
+          {showInput ? (
+            <>
+              <div className="cb-input-row">
+                <input
+                  ref={inputRef}
+                  className="cb-text-input"
+                  value={message}
+                  placeholder={currentNode?.name || "Type your message…"}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  autoComplete="off"
+                />
+                <button
+                  className="cb-send-btn"
+                  onClick={handleSend}
+                  disabled={!message.trim() || !connected}
+                  aria-label="Send message"
+                >
+                  <SendIcon />
+                </button>
+              </div>
+              <p className="cb-input-hint">Press Enter to send</p>
+            </>
+          ) : (
+            <p className="cb-input-hint" style={{ margin: 0 }}>
+              {connected
+                ? "Select an option above to continue"
+                : "Waiting for connection…"}
+            </p>
+          )}
+        </div>
+
       </div>
     </div>
   );

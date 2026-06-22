@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -9,12 +9,13 @@ import {
   useNodesState,
   useEdgesState,
 } from "@xyflow/react";
-import { Modal, Button } from "react-bootstrap";
+import { Modal, Button, Form } from "react-bootstrap";
 
 import "@xyflow/react/dist/style.css";
 import { DecisionNode } from "./module/DecisionNode";
 import NodeDetails from "./module/NodeDetails";
 
+/* ─── StateNode ─────────────────────────────────────────────────────────── */
 function StateNode({ id, data }) {
   return (
     <div
@@ -29,437 +30,259 @@ function StateNode({ id, data }) {
       }}
     >
       <Handle type="target" position={Position.Top} />
-
-      <div
-        style={{
-          fontWeight: 600,
-          marginBottom: 10,
-        }}
-      >
-        {data.label}
-      </div>
-
+      <div style={{ fontWeight: 600, marginBottom: 10 }}>{data.label}</div>
       <button
         className="nodrag nopan"
-        onClick={(e) => {
-          e.stopPropagation();
-          data.onAdd(id);
-        }}
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: "50%",
-          border: "none",
-          cursor: "pointer",
-          fontSize: 18,
-        }}
+        onClick={(e) => { e.stopPropagation(); data.onAdd(id); }}
+        style={{ width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer", fontSize: 18 }}
       >
         +
       </button>
-      <Handle
-        type="source"
-        position={Position.Bottom}
-      />
+      <Handle type="source" position={Position.Bottom} />
     </div>
   );
 }
 
-const nodeTypes = {
-  state: StateNode,
-  decision: DecisionNode,
-};
+const nodeTypes = { state: StateNode, decision: DecisionNode };
+
+/* ─── App ───────────────────────────────────────────────────────────────── */
 export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
-
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
-
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-
   const [selectedNode, setSelectedNode] = useState(null);
-  // const selectedNode = useMemo(
-  //   () => nodes.find((node) => node.id === selectedNodeId),
-  //   [nodes, selectedNodeId]
-  // );
 
+  // ── Workflow name modal state ──────────────────────────────────────────
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [workflowName, setWorkflowName] = useState("");
+  const [workflowNameError, setWorkflowNameError] = useState("");
+  const nameInputRef = useRef(null);
 
-  useEffect(() => {
-    console.log("Nodes updated:", nodes);
-    console.log("Edges updated:", edges);
-  }, [nodes]);
+  // ── Saving state ───────────────────────────────────────────────────────
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    console.log("Selected Node", selectedNode?.data);
-
-  }, [selectedNode]);
-
+  /* ── addChildNode ──────────────────────────────────────────────────────── */
   const addChildNode = useCallback(
     (parentId) => {
       const parent = nodes.find((n) => n.id === parentId);
-
       if (!parent) return;
 
-      const outgoingEdges = edges.filter(
-        (e) => e.source === parentId
-      );
-
+      const outgoingEdges = edges.filter((e) => e.source === parentId);
       const newNodeId = Date.now().toString();
 
-      // First child -> normal flow
       if (outgoingEdges.length === 0) {
-        const childNode = {
-          id: newNodeId,
-          type: "state",
-          position: {
-            x: parent.position.x,
-            y: parent.position.y + 180,
+        setNodes((nds) => [
+          ...nds,
+          {
+            id: newNodeId,
+            type: "state",
+            position: { x: parent.position.x, y: parent.position.y + 180 },
+            data: { label: "New State", config: { isNodeConfigRequired: false, nodeType: undefined, headers: [] } },
           },
-          data: {
-            label: "New State",
-            config: {
-              isNodeConfigRequired: false,
-              nodeType: undefined,
-              headers: [],
-            },
-          },
-        };
-
-        const edge = {
-          id: `${parentId}-${newNodeId}`,
-          source: parentId,
-          target: newNodeId,
-          data: {
-            condition: "",
-          },
-        };
-
-        setNodes((nds) => [...nds, childNode]);
-        setEdges((eds) => [...eds, edge]);
-
+        ]);
+        setEdges((eds) => [...eds, { id: `${parentId}-${newNodeId}`, source: parentId, target: newNodeId, data: { condition: "" } }]);
         return;
       }
 
-      // Check if already connected to decision node
       const firstTarget = outgoingEdges[0]?.target;
+      const decisionNode = nodes.find((n) => n.id === firstTarget && n.type === "decision");
 
-      const decisionNode = nodes.find(
-        (n) =>
-          n.id === firstTarget &&
-          n.type === "decision"
-      );
-
-      // Already decision node
       if (decisionNode) {
-        const childNode = {
-          id: newNodeId,
-          type: "state",
-          position: {
-            x:
-              decisionNode.position.x +
-              outgoingEdges.length * 250,
-            y: decisionNode.position.y + 180,
+        setNodes((nds) => [
+          ...nds,
+          {
+            id: newNodeId,
+            type: "state",
+            position: { x: decisionNode.position.x + outgoingEdges.length * 250, y: decisionNode.position.y + 180 },
+            data: { label: "New State", config: { isNodeConfigRequired: false, nodeType: undefined, headers: [] } },
           },
-          data: {
-            label: "New State",
-            config: {
-              isNodeConfigRequired: false,
-              nodeType: undefined,
-              headers: [],
-            },
-          },
-        };
-
-        const edge = {
-          id: `${decisionNode.id}-${newNodeId}`,
-          source: decisionNode.id,
-          target: newNodeId,
-          data: {
-            condition: "",
-          },
-        };
-
-        setNodes((nds) => [...nds, childNode]);
-        setEdges((eds) => [...eds, edge]);
-
+        ]);
+        setEdges((eds) => [...eds, { id: `${decisionNode.id}-${newNodeId}`, source: decisionNode.id, target: newNodeId, data: { condition: "" } }]);
         return;
       }
 
-      // Convert existing flow to decision flow
       const existingTarget = outgoingEdges[0].target;
-
       const decisionId = `decision-${Date.now()}`;
-
-      const decisionNodeData = {
-        id: decisionId,
-        type: "decision",
-        position: {
-          x: parent.position.x,
-          y: parent.position.y + 120,
-        },
-        data: {
-          label: "Decision",
-        },
-      };
-
-      const newChildNode = {
-        id: newNodeId,
-        type: "state",
-        position: {
-          x: parent.position.x + 250,
-          y: parent.position.y + 300,
-        },
-        data: {
-          label: "New State",
-          config: {
-            isNodeConfigRequired: false,
-            nodeType: undefined,
-            headers: [],
-          },
-        },
-      };
 
       setNodes((nds) => [
         ...nds,
-        decisionNodeData,
-        newChildNode,
+        { id: decisionId, type: "decision", position: { x: parent.position.x, y: parent.position.y + 120 }, data: { label: "Decision" } },
+        {
+          id: newNodeId,
+          type: "state",
+          position: { x: parent.position.x + 250, y: parent.position.y + 300 },
+          data: { label: "New State", config: { isNodeConfigRequired: false, nodeType: undefined, headers: [] } },
+        },
       ]);
 
       setEdges((eds) => {
-        const filtered = eds.filter(
-          (e) => e.id !== outgoingEdges[0].id
-        );
-
+        const filtered = eds.filter((e) => e.id !== outgoingEdges[0].id);
         return [
           ...filtered,
-
-          // Parent -> Decision
-          {
-            id: `${parentId}-${decisionId}`,
-            source: parentId,
-            target: decisionId,
-          },
-
-          // Decision -> Existing child
-          {
-            id: `${decisionId}-${existingTarget}`,
-            source: decisionId,
-            target: existingTarget,
-            data: {
-              condition: "Condition 1",
-            },
-            label: "Condition 1",
-          },
-
-          // Decision -> New child
-          {
-            id: `${decisionId}-${newNodeId}`,
-            source: decisionId,
-            target: newNodeId,
-            data: {
-              condition: "Condition 2",
-            },
-            label: "Condition 2",
-          },
+          { id: `${parentId}-${decisionId}`, source: parentId, target: decisionId },
+          { id: `${decisionId}-${existingTarget}`, source: decisionId, target: existingTarget, data: { condition: "Condition 1" }, label: "Condition 1" },
+          { id: `${decisionId}-${newNodeId}`, source: decisionId, target: newNodeId, data: { condition: "Condition 2" }, label: "Condition 2" },
         ];
       });
     },
     [nodes, edges]
   );
 
-
+  /* ── nodesWithActions ─────────────────────────────────────────────────── */
   const nodesWithActions = useMemo(
-    () =>
-      nodes.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          onAdd: addChildNode,
-        },
-      })),
+    () => nodes.map((node) => ({ ...node, data: { ...node.data, onAdd: addChildNode } })),
     [nodes, addChildNode]
   );
 
-  const createRootNode = () => {
-    const id = Date.now().toString();
+  /* ── Open name modal (intercepts "Create Workflow" click) ─────────────── */
+  const openNameModal = () => {
+    setWorkflowName("");
+    setWorkflowNameError("");
+    setShowNameModal(true);
+    // auto-focus input after modal renders
+    setTimeout(() => nameInputRef.current?.focus(), 150);
+  };
 
+  /* ── Confirm name → create root node ──────────────────────────────────── */
+  const confirmCreateWorkflow = () => {
+    const trimmed = workflowName.trim();
+    if (!trimmed) {
+      setWorkflowNameError("Workflow name is required.");
+      nameInputRef.current?.focus();
+      return;
+    }
+    if (trimmed.length > 100) {
+      setWorkflowNameError("Name must be 100 characters or fewer.");
+      return;
+    }
+
+    setShowNameModal(false);
+
+    const id = Date.now().toString();
     setNodes([
       {
         id,
         type: "state",
-        position: {
-          x: 300,
-          y: 100,
-        },
-        data: {
-          label: "Start State",
-          onAdd: addChildNode,
-        },
+        position: { x: 300, y: 100 },
+        data: { label: "Start State", onAdd: addChildNode },
       },
     ]);
-
     setEdges([]);
   };
 
+  /* ── updateLabel / deleteNode ─────────────────────────────────────────── */
   const updateLabel = (value) => {
     setNodes((nds) =>
       nds.map((node) =>
-        node.id === selectedNodeId
-          ? {
-            ...node,
-            data: {
-              ...node.data,
-              label: value,
-            },
-          }
-          : node
+        node.id === selectedNodeId ? { ...node, data: { ...node.data, label: value } } : node
       )
     );
   };
 
   const deleteNode = () => {
     if (!selectedNodeId) return;
-
-    setNodes((nds) =>
-      nds.filter(
-        (node) => node.id !== selectedNodeId
-      )
-    );
-
-    setEdges((eds) =>
-      eds.filter(
-        (edge) =>
-          edge.source !== selectedNodeId &&
-          edge.target !== selectedNodeId
-      )
-    );
-
+    setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
+    setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId));
     setSelectedNodeId(null);
   };
 
-
+  /* ── saveWorkflow ─────────────────────────────────────────────────────── */
   const saveWorkflow = async () => {
-    console.log("Saving workflow...");
     const workflowData = {
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        type: node.type,
-        name: node.data.label,
-        position: node.position,
-        config: node.data.config || null,
-        // Decision node specific data
-        decision:
-          node.type === "decision"
-            ? {
-              label: node.data.label,
-            }
-            : null,
-      })),
-
-      transitions: edges.map((edge) => ({
-        id: edge.id,
-        sourceNodeId: edge.source,
-        targetNodeId: edge.target,
-
-        // condition attached to edge
-        condition:
-          edge.data?.condition || "",
-      })),
+      name: workflowName.trim(),
+      workflowJson: {   // ← sent to backend
+        nodes: nodes.map((node) => ({
+          id: node.id,
+          type: node.type,
+          name: node.data.label,
+          position: node.position,
+          config: node.data.config || null,
+          decision: node.type === "decision" ? { label: node.data.label } : null,
+        })),
+        transitions: edges.map((edge) => ({
+          id: edge.id,
+          sourceNodeId: edge.source,
+          targetNodeId: edge.target,
+          condition: edge.data?.condition || "",
+        })),
+      }
     };
 
     try {
-      console.log(
-        "Workflow Payload",
-        workflowData
-      );
-
-
-      await fetch("http://localhost:8080/api/workflows", {
+      setSaving(true);
+      const res = await fetch("http://localhost:8080/api/workflows", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(workflowData),
       });
 
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Save failed");
+      }
 
       alert("Workflow saved successfully");
     } catch (error) {
       console.error(error);
-      alert("Failed to save workflow");
+      alert(`Failed to save workflow: ${error.message}`);
+    } finally {
+      setSaving(false);
     }
   };
 
-
+  /* ── handleNodeClick ──────────────────────────────────────────────────── */
   const handleNodeClick = (e, node) => {
-    if (
-      e.target.tagName === "BUTTON" ||
-      e.target.closest("button")
-    ) {
-      return;
-    }
-
+    if (e.target.tagName === "BUTTON" || e.target.closest("button")) return;
     setSelectedNodeId(node.id);
     setSelectedNode(node);
   };
+
+  /* ─── Render ────────────────────────────────────────────────────────── */
   return (
     <>
+      {/* ── ReactFlow canvas ──────────────────────────────────────────── */}
+      <div style={{ display: "flex", height: "100%" }}>
+        <div style={{ flex: 1, position: "relative" }}>
 
-
-
-      <div
-        style={{
-          borderLeft: "1px solid #ddd",
-          display: "flex",
-          height: "100vh",
-        }}
-      >
-        <div
-          style={{
-            flex: 1,
-            position: "relative",
-          }}
-        >
+          {/* Create Workflow button */}
           {nodes.length === 0 && (
-            <>
-              <div>
-                <button
-                  onClick={createRootNode}
-                  style={{
-                    position: "absolute",
-                    top: 20,
-                    left: 20,
-                    zIndex: 1000,
-                    padding: "12px 20px",
-                  }}
-                >
-                  Create Workflow
-                </button>
-              </div>
-
-            </>
+            <button
+              onClick={openNameModal}
+              style={{ position: "absolute", top: 20, left: 20, zIndex: 1000, padding: "12px 20px" }}
+            >
+              Create Workflow
+            </button>
           )}
-          {
-            nodes.length > 0 && (
-              <div>
 
-                <button
+          {/* Save Workflow button */}
+          {nodes.length > 0 && (
+            <div style={{ position: "absolute", top: 20, left: 20, zIndex: 1000, display: "flex", alignItems: "center", gap: 10 }}>
+              {/* workflow name badge */}
+              {workflowName && (
+                <span
                   style={{
-                    position: "absolute",
-                    top: 20,
-                    left: 20,
-                    zIndex: 1000,
-                    padding: "12px 20px",
-
+                    background: "#f0f4ff",
+                    border: "1px solid #c7d2fe",
+                    color: "#4338ca",
+                    borderRadius: 8,
+                    padding: "6px 14px",
+                    fontWeight: 600,
+                    fontSize: 14,
                   }}
-                  className="btn btn-success"
-                  onClick={saveWorkflow}
                 >
-                  Save Workflow
-                </button>
-
-              </div>
-            )
-          }
-
+                  📋 {workflowName}
+                </span>
+              )}
+              <button
+                className="btn btn-success"
+                style={{ padding: "10px 20px" }}
+                onClick={saveWorkflow}
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save Workflow"}
+              </button>
+            </div>
+          )}
 
           <ReactFlow
             nodes={nodesWithActions}
@@ -475,106 +298,84 @@ export default function App() {
             <MiniMap />
           </ReactFlow>
         </div>
-
-        {
-          //     nodes.length > 0 && selectedNode && (
-          //        <div
-          //       style={{
-          //         width: 400,
-          //         padding: 20,
-          //         borderLeft: "1px solid #ddd",
-          //       }}
-          //     >
-
-          //       <div className="mt-2 " style={{ paddingBottom: "0px", height: "85vh",backgroundColor:"transparent",overflowY:"scroll" }}>
-          //         {!selectedNode ? (
-          //           <div>Select a node</div>
-          //         ) : (
-          //           <>
-          //             {/* NodeDetails */}
-          //             <h3 className="text-lg text-center font-bold mb-4 ">Node Settings</h3>
-          //             <NodeDetails
-          //               selectedNode={selectedNode}
-          //               edges={edges}
-          //               setEdges={setEdges}
-          //               updateLabel={updateLabel}
-          //               setSelectedNode={setSelectedNode}
-          //               setNodes={setNodes}
-          //               nodes={nodes}
-          //             />
-
-
-          //           </>
-          //         )}
-
-          // <hr/>
-
-          //       </div>
-
-          //       <div class="fixed bottom-10 right-180 z-1000 flex justify-center gap-10 mt-20 w-100" style={{ backgroundColor: "red" }}>
-          //         <div>
-          //           <button
-          //             onClick={deleteNode}
-          //             style={{
-          //               position: "fixed",
-          //               bottom: 10,
-          //               right: 200,
-          //               padding: "12px 20px",
-          //               background: "red",
-          //               color: "#fff",
-          //               border: "none",
-          //               borderRadius: 6,
-          //             }}
-          //           >
-          //             Delete Node
-          //           </button>
-          //         </div>
-          //         <div>
-          //           <button
-          //             onClick={() => saveWorkflow()}
-          //             style={{
-          //               position: "fixed",
-          //               bottom: 10,
-          //               right: 20,
-          //               zIndex: 1000,
-          //               padding: "12px 20px",
-          //               background: "#28a745",
-          //               color: "#fff",
-          //               border: "none",
-          //               borderRadius: 6,
-          //             }}
-          //           >
-          //             Save Workflow
-          //           </button>
-          //         </div>
-          //       </div>
-
-
-          //     </div>
-          //     )
-        }
-
-
-
       </div>
 
+      {/* ── Workflow Name Modal ────────────────────────────────────────── */}
+      <Modal
+        show={showNameModal}
+        onHide={() => setShowNameModal(false)}
+        centered
+        size="sm"
+      >
+        <Modal.Header closeButton style={{ borderBottom: "1px solid #e5e7eb", padding: "18px 24px" }}>
+          <Modal.Title style={{ fontSize: 18, fontWeight: 700 }}>
+            🗂️ Name Your Workflow
+          </Modal.Title>
+        </Modal.Header>
 
+        <Modal.Body style={{ padding: "24px" }}>
+          <Form
+            onSubmit={(e) => {
+              e.preventDefault();
+              confirmCreateWorkflow();
+            }}
+          >
+            <Form.Group>
+              <Form.Label style={{ fontWeight: 600, marginBottom: 6 }}>
+                Workflow Name <span style={{ color: "#ef4444" }}>*</span>
+              </Form.Label>
+              <Form.Control
+                ref={nameInputRef}
+                type="text"
+                value={workflowName}
+                onChange={(e) => {
+                  setWorkflowName(e.target.value);
+                  if (workflowNameError) setWorkflowNameError("");
+                }}
+                placeholder="e.g. Track Shipment, OTP Verification…"
+                isInvalid={!!workflowNameError}
+                maxLength={100}
+                autoComplete="off"
+              />
+              <Form.Control.Feedback type="invalid">
+                {workflowNameError}
+              </Form.Control.Feedback>
+              <Form.Text className="text-muted" style={{ fontSize: 12 }}>
+                {workflowName.length}/100 characters
+              </Form.Text>
+            </Form.Group>
+          </Form>
+        </Modal.Body>
 
-      <Modal dialogClassName="workflow-modal"
-        contentClassName="workflow-content"
+        <Modal.Footer style={{ borderTop: "1px solid #e5e7eb", padding: "14px 24px", gap: 8 }}>
+          <Button
+            variant="outline-secondary"
+            onClick={() => setShowNameModal(false)}
+            style={{ borderRadius: 8, minWidth: 80 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={confirmCreateWorkflow}
+            disabled={!workflowName.trim()}
+            style={{ borderRadius: 8, minWidth: 140 }}
+          >
+            Create Workflow
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* ── Node Settings Modal ────────────────────────────────────────── */}
+      <Modal
         show={!!selectedNode}
-        onHide={() => {
-          setSelectedNode(null);
-          setSelectedNodeId(null);
-        }}
-        // centered
+        onHide={() => { setSelectedNode(null); setSelectedNodeId(null); }}
         size="xl"
         dialogClassName="workflow-modal"
+        contentClassName="workflow-content"
       >
         <Modal.Header closeButton className="workflow-header">
-          <Modal.Title>
-            ⚙️ Node Settings
-          </Modal.Title>
+          <Modal.Title>⚙️ Node Settings</Modal.Title>
         </Modal.Header>
 
         <Modal.Body className="workflow-body">
@@ -598,8 +399,6 @@ export default function App() {
           >
             Delete Node
           </Button>
-
-
         </Modal.Footer>
       </Modal>
     </>
