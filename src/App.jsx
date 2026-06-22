@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -8,11 +8,13 @@ import {
   Position,
   useNodesState,
   useEdgesState,
+  addEdge,
 } from "@xyflow/react";
 import { Modal, Button, Form } from "react-bootstrap";
 
 import "@xyflow/react/dist/style.css";
 import { DecisionNode } from "./module/DecisionNode";
+import { WorkflowNode } from "./module/WorkflowNode";
 import NodeDetails from "./module/NodeDetails";
 
 /* ─── StateNode ─────────────────────────────────────────────────────────── */
@@ -27,6 +29,7 @@ function StateNode({ id, data }) {
         minWidth: 180,
         textAlign: "center",
         position: "relative",
+        boxShadow: "0 4px 12px rgba(79,99,255,0.35)",
       }}
     >
       <Handle type="target" position={Position.Top} />
@@ -43,7 +46,11 @@ function StateNode({ id, data }) {
   );
 }
 
-const nodeTypes = { state: StateNode, decision: DecisionNode };
+const nodeTypes = {
+  state: StateNode,
+  decision: DecisionNode,
+  workflow: WorkflowNode,
+};
 
 /* ─── App ───────────────────────────────────────────────────────────────── */
 export default function App() {
@@ -52,16 +59,24 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState(null);
 
-  // ── Workflow name modal state ──────────────────────────────────────────
+  // Workflow name modal
   const [showNameModal, setShowNameModal] = useState(false);
   const [workflowName, setWorkflowName] = useState("");
   const [workflowNameError, setWorkflowNameError] = useState("");
   const nameInputRef = useRef(null);
 
-  // ── Saving state ───────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
 
-  /* ── addChildNode ──────────────────────────────────────────────────────── */
+  /* ── onConnect — allows manual drag-connections for loop-back edges ───── */
+  const onConnect = useCallback(
+    (params) =>
+      setEdges((eds) =>
+        addEdge({ ...params, data: { condition: "" } }, eds)
+      ),
+    [setEdges]
+  );
+
+  /* ── addChildNode ─────────────────────────────────────────────────────── */
   const addChildNode = useCallback(
     (parentId) => {
       const parent = nodes.find((n) => n.id === parentId);
@@ -85,19 +100,19 @@ export default function App() {
       }
 
       const firstTarget = outgoingEdges[0]?.target;
-      const decisionNode = nodes.find((n) => n.id === firstTarget && n.type === "decision");
+      const existingDecision = nodes.find((n) => n.id === firstTarget && n.type === "decision");
 
-      if (decisionNode) {
+      if (existingDecision) {
         setNodes((nds) => [
           ...nds,
           {
             id: newNodeId,
             type: "state",
-            position: { x: decisionNode.position.x + outgoingEdges.length * 250, y: decisionNode.position.y + 180 },
+            position: { x: existingDecision.position.x + outgoingEdges.length * 250, y: existingDecision.position.y + 180 },
             data: { label: "New State", config: { isNodeConfigRequired: false, nodeType: undefined, headers: [] } },
           },
         ]);
-        setEdges((eds) => [...eds, { id: `${decisionNode.id}-${newNodeId}`, source: decisionNode.id, target: newNodeId, data: { condition: "" } }]);
+        setEdges((eds) => [...eds, { id: `${existingDecision.id}-${newNodeId}`, source: existingDecision.id, target: newNodeId, data: { condition: "" } }]);
         return;
       }
 
@@ -114,7 +129,6 @@ export default function App() {
           data: { label: "New State", config: { isNodeConfigRequired: false, nodeType: undefined, headers: [] } },
         },
       ]);
-
       setEdges((eds) => {
         const filtered = eds.filter((e) => e.id !== outgoingEdges[0].id);
         return [
@@ -128,54 +142,59 @@ export default function App() {
     [nodes, edges]
   );
 
+  /* ── Add a Workflow Link node ─────────────────────────────────────────── */
+  const addWorkflowNode = () => {
+    const id = `workflow-${Date.now()}`;
+    // Place near the centre of the current view
+    const lastNode = nodes[nodes.length - 1];
+    const position = lastNode
+      ? { x: lastNode.position.x + 300, y: lastNode.position.y }
+      : { x: 300, y: 300 };
+
+    setNodes((nds) => [
+      ...nds,
+      {
+        id,
+        type: "workflow",
+        position,
+        data: {
+          label: "Workflow Link",
+          linkedWorkflowId: null,
+          linkedWorkflowName: null,
+        },
+      },
+    ]);
+  };
+
   /* ── nodesWithActions ─────────────────────────────────────────────────── */
   const nodesWithActions = useMemo(
     () => nodes.map((node) => ({ ...node, data: { ...node.data, onAdd: addChildNode } })),
     [nodes, addChildNode]
   );
 
-  /* ── Open name modal (intercepts "Create Workflow" click) ─────────────── */
+  /* ── Workflow name modal ──────────────────────────────────────────────── */
   const openNameModal = () => {
     setWorkflowName("");
     setWorkflowNameError("");
     setShowNameModal(true);
-    // auto-focus input after modal renders
     setTimeout(() => nameInputRef.current?.focus(), 150);
   };
 
-  /* ── Confirm name → create root node ──────────────────────────────────── */
   const confirmCreateWorkflow = () => {
     const trimmed = workflowName.trim();
-    if (!trimmed) {
-      setWorkflowNameError("Workflow name is required.");
-      nameInputRef.current?.focus();
-      return;
-    }
-    if (trimmed.length > 100) {
-      setWorkflowNameError("Name must be 100 characters or fewer.");
-      return;
-    }
+    if (!trimmed) { setWorkflowNameError("Workflow name is required."); nameInputRef.current?.focus(); return; }
+    if (trimmed.length > 100) { setWorkflowNameError("Name must be 100 characters or fewer."); return; }
 
     setShowNameModal(false);
-
     const id = Date.now().toString();
-    setNodes([
-      {
-        id,
-        type: "state",
-        position: { x: 300, y: 100 },
-        data: { label: "Start State", onAdd: addChildNode },
-      },
-    ]);
+    setNodes([{ id, type: "state", position: { x: 300, y: 100 }, data: { label: "Start State" } }]);
     setEdges([]);
   };
 
   /* ── updateLabel / deleteNode ─────────────────────────────────────────── */
   const updateLabel = (value) => {
     setNodes((nds) =>
-      nds.map((node) =>
-        node.id === selectedNodeId ? { ...node, data: { ...node.data, label: value } } : node
-      )
+      nds.map((n) => n.id === selectedNodeId ? { ...n, data: { ...n.data, label: value } } : n)
     );
   };
 
@@ -190,13 +209,16 @@ export default function App() {
   const saveWorkflow = async () => {
     const workflowData = {
       name: workflowName.trim(),
-      workflowJson: {   // ← sent to backend
+      workflowJson: {
         nodes: nodes.map((node) => ({
           id: node.id,
           type: node.type,
           name: node.data.label,
           position: node.position,
           config: node.data.config || null,
+          displayVariable: node.data.displayVariable || null,
+          // Workflow link node specific
+          linkedWorkflowId: node.data.linkedWorkflowId || null,
           decision: node.type === "decision" ? { label: node.data.label } : null,
         })),
         transitions: edges.map((edge) => ({
@@ -205,7 +227,7 @@ export default function App() {
           targetNodeId: edge.target,
           condition: edge.data?.condition || "",
         })),
-      }
+      },
     };
 
     try {
@@ -215,15 +237,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(workflowData),
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || "Save failed");
       }
-
       alert("Workflow saved successfully");
     } catch (error) {
-      console.error(error);
       alert(`Failed to save workflow: ${error.message}`);
     } finally {
       setSaving(false);
@@ -237,52 +256,70 @@ export default function App() {
     setSelectedNode(node);
   };
 
-  /* ─── Render ────────────────────────────────────────────────────────── */
+  /* ─── Render ─────────────────────────────────────────────────────────── */
   return (
     <>
-      {/* ── ReactFlow canvas ──────────────────────────────────────────── */}
       <div style={{ display: "flex", height: "100%" }}>
         <div style={{ flex: 1, position: "relative" }}>
 
-          {/* Create Workflow button */}
-          {nodes.length === 0 && (
-            <button
-              onClick={openNameModal}
-              style={{ position: "absolute", top: 20, left: 20, zIndex: 1000, padding: "12px 20px" }}
-            >
-              Create Workflow
-            </button>
-          )}
+          {/* ── Toolbar ─────────────────────────────────────────────────── */}
+          <div
+            style={{
+              position: "absolute", top: 16, left: 16, zIndex: 1000,
+              display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+            }}
+          >
+            {nodes.length === 0 ? (
+              <button
+                onClick={openNameModal}
+                style={{
+                  padding: "10px 18px", borderRadius: 8,
+                  background: "#4f63ff", color: "#fff", border: "none",
+                  fontWeight: 600, cursor: "pointer", fontSize: 14,
+                  boxShadow: "0 2px 8px rgba(79,99,255,0.4)",
+                }}
+              >
+                + Create Workflow
+              </button>
+            ) : (
+              <>
+                {/* Workflow name badge */}
+                {workflowName && (
+                  <span style={{
+                    background: "#f0f4ff", border: "1px solid #c7d2fe",
+                    color: "#4338ca", borderRadius: 8, padding: "8px 14px",
+                    fontWeight: 600, fontSize: 13,
+                  }}>
+                    📋 {workflowName}
+                  </span>
+                )}
 
-          {/* Save Workflow button */}
-          {nodes.length > 0 && (
-            <div style={{ position: "absolute", top: 20, left: 20, zIndex: 1000, display: "flex", alignItems: "center", gap: 10 }}>
-              {/* workflow name badge */}
-              {workflowName && (
-                <span
+                {/* Add Workflow Link node button */}
+                <button
+                  onClick={addWorkflowNode}
                   style={{
-                    background: "#f0f4ff",
-                    border: "1px solid #c7d2fe",
-                    color: "#4338ca",
-                    borderRadius: 8,
-                    padding: "6px 14px",
-                    fontWeight: 600,
-                    fontSize: 14,
+                    padding: "8px 14px", borderRadius: 8,
+                    background: "linear-gradient(135deg,#0d9488,#0891b2)",
+                    color: "#fff", border: "none",
+                    fontWeight: 600, cursor: "pointer", fontSize: 13,
+                    boxShadow: "0 2px 8px rgba(13,148,136,0.4)",
                   }}
                 >
-                  📋 {workflowName}
-                </span>
-              )}
-              <button
-                className="btn btn-success"
-                style={{ padding: "10px 20px" }}
-                onClick={saveWorkflow}
-                disabled={saving}
-              >
-                {saving ? "Saving…" : "Save Workflow"}
-              </button>
-            </div>
-          )}
+                  🔗 Add Workflow Link
+                </button>
+
+                {/* Save */}
+                <button
+                  className="btn btn-success"
+                  style={{ padding: "8px 18px", fontWeight: 600 }}
+                  onClick={saveWorkflow}
+                  disabled={saving}
+                >
+                  {saving ? "Saving…" : "💾 Save Workflow"}
+                </button>
+              </>
+            )}
+          </div>
 
           <ReactFlow
             nodes={nodesWithActions}
@@ -290,6 +327,7 @@ export default function App() {
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
             onNodeClick={handleNodeClick}
             fitView
           >
@@ -300,26 +338,13 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Workflow Name Modal ────────────────────────────────────────── */}
-      <Modal
-        show={showNameModal}
-        onHide={() => setShowNameModal(false)}
-        centered
-        size="sm"
-      >
+      {/* ── Workflow Name Modal ──────────────────────────────────────────── */}
+      <Modal show={showNameModal} onHide={() => setShowNameModal(false)} centered size="sm">
         <Modal.Header closeButton style={{ borderBottom: "1px solid #e5e7eb", padding: "18px 24px" }}>
-          <Modal.Title style={{ fontSize: 18, fontWeight: 700 }}>
-            🗂️ Name Your Workflow
-          </Modal.Title>
+          <Modal.Title style={{ fontSize: 18, fontWeight: 700 }}>🗂️ Name Your Workflow</Modal.Title>
         </Modal.Header>
-
         <Modal.Body style={{ padding: "24px" }}>
-          <Form
-            onSubmit={(e) => {
-              e.preventDefault();
-              confirmCreateWorkflow();
-            }}
-          >
+          <Form onSubmit={(e) => { e.preventDefault(); confirmCreateWorkflow(); }}>
             <Form.Group>
               <Form.Label style={{ fontWeight: 600, marginBottom: 6 }}>
                 Workflow Name <span style={{ color: "#ef4444" }}>*</span>
@@ -328,45 +353,26 @@ export default function App() {
                 ref={nameInputRef}
                 type="text"
                 value={workflowName}
-                onChange={(e) => {
-                  setWorkflowName(e.target.value);
-                  if (workflowNameError) setWorkflowNameError("");
-                }}
+                onChange={(e) => { setWorkflowName(e.target.value); if (workflowNameError) setWorkflowNameError(""); }}
                 placeholder="e.g. Track Shipment, OTP Verification…"
                 isInvalid={!!workflowNameError}
                 maxLength={100}
                 autoComplete="off"
               />
-              <Form.Control.Feedback type="invalid">
-                {workflowNameError}
-              </Form.Control.Feedback>
-              <Form.Text className="text-muted" style={{ fontSize: 12 }}>
-                {workflowName.length}/100 characters
-              </Form.Text>
+              <Form.Control.Feedback type="invalid">{workflowNameError}</Form.Control.Feedback>
+              <Form.Text className="text-muted" style={{ fontSize: 12 }}>{workflowName.length}/100</Form.Text>
             </Form.Group>
           </Form>
         </Modal.Body>
-
         <Modal.Footer style={{ borderTop: "1px solid #e5e7eb", padding: "14px 24px", gap: 8 }}>
-          <Button
-            variant="outline-secondary"
-            onClick={() => setShowNameModal(false)}
-            style={{ borderRadius: 8, minWidth: 80 }}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={confirmCreateWorkflow}
-            disabled={!workflowName.trim()}
-            style={{ borderRadius: 8, minWidth: 140 }}
-          >
+          <Button variant="outline-secondary" onClick={() => setShowNameModal(false)} style={{ borderRadius: 8 }}>Cancel</Button>
+          <Button variant="primary" onClick={confirmCreateWorkflow} disabled={!workflowName.trim()} style={{ borderRadius: 8, minWidth: 140 }}>
             Create Workflow
           </Button>
         </Modal.Footer>
       </Modal>
 
-      {/* ── Node Settings Modal ────────────────────────────────────────── */}
+      {/* ── Node Settings Modal ──────────────────────────────────────────── */}
       <Modal
         show={!!selectedNode}
         onHide={() => { setSelectedNode(null); setSelectedNodeId(null); }}
@@ -377,7 +383,6 @@ export default function App() {
         <Modal.Header closeButton className="workflow-header">
           <Modal.Title>⚙️ Node Settings</Modal.Title>
         </Modal.Header>
-
         <Modal.Body className="workflow-body">
           {selectedNode && (
             <NodeDetails
@@ -391,7 +396,6 @@ export default function App() {
             />
           )}
         </Modal.Body>
-
         <Modal.Footer className="workflow-footer">
           <Button
             variant="outline-danger"
