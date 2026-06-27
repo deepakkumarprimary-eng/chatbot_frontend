@@ -11,6 +11,7 @@ export default function ChatBot() {
   const [currentNode, setCurrentNode] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [canGoBack, setCanGoBack] = useState(false);
 
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -119,14 +120,6 @@ export default function ChatBot() {
   /* ── Send helpers ──────────────────────────────────────────────────────── */
   const sendMessage = useCallback(
     (value) => {
-
-         const payload = {
-      sessionId: currentNode?.sessionId || sessionId,
-      message: value,
-    };
-
-    console.log("Sending payload:", payload);
-
       if (!stompClient?.connected || !sessionId) return;
       setIsTyping(true);
       stompClient.publish({
@@ -145,12 +138,15 @@ export default function ChatBot() {
     const text = message.trim();
 
     // Determine which variable this input maps to
-    const variableName = currentField?.variableName || null;
+    const variableName = currentNode?.node?.config?.variableName || null;
 
     setChat((prev) => [
       ...prev,
       { sender: "user", text, time: new Date() },
     ]);
+
+    // After user gives input, they can go back
+    setCanGoBack(true);
 
     // Send with variable metadata so backend can store it correctly
     if (!stompClient?.connected || !sessionId) return;
@@ -160,17 +156,31 @@ export default function ChatBot() {
       body: JSON.stringify({
         sessionId: currentNode?.sessionId || sessionId,
         message: text,
-        variableName,        // ← tells backend which variable to store this under
+        variableName,
       }),
     });
 
-    // Advance to next field if there are more
-    if (inputFields.length > 1 && inputFieldIndexRef.current < inputFields.length - 1) {
-      inputFieldIndexRef.current += 1;
-    }
-
     setMessage("");
     inputRef.current?.focus();
+  };
+
+  /* ── Go Back — returns to the previous input node ──────────────────────── */
+  const handleGoBack = () => {
+    if (!stompClient?.connected || !sessionId) return;
+    setIsTyping(true);
+
+    // Add a system message to indicate user went back
+    setChat((prev) => [
+      ...prev,
+      { sender: "system", text: "⬅ Went back to previous input", time: new Date() },
+    ]);
+
+    stompClient.publish({
+      destination: "/app/chat.back",
+      body: JSON.stringify({
+        sessionId: currentNode?.sessionId || sessionId,
+      }),
+    });
   };
 
   const handleOptionClick = (value) => {
@@ -181,6 +191,7 @@ export default function ChatBot() {
         time: new Date() 
       },
     ]);
+    setCanGoBack(true);
     sendMessage(value.id);
   };
 
@@ -197,6 +208,7 @@ export default function ChatBot() {
       ...prev,
       { sender: "user", text: workflow.name, time: new Date() },
     ]);
+    setCanGoBack(true);
   };
 
   const handleKeyDown = (e) => {
@@ -206,23 +218,9 @@ export default function ChatBot() {
     }
   };
 
-  /* ── Input visibility + dynamic field resolution ──────────────────────── */
+  /* ── Input visibility ───────────────────────────────────────────────────── */
   const showInput = currentNode?.node?.config?.nodeType === "input";
-
-  // Which input field are we currently collecting?
-  // Track index across responses via a ref so it persists between re-renders
-  const inputFieldIndexRef = useRef(0);
-
-  // Reset field index whenever we move to a new node
-  useEffect(() => {
-    if (currentNode?.node?.config?.nodeType === "input") {
-      inputFieldIndexRef.current = 0;
-    }
-  }, [currentNode?.node?.id]);
-
-  const inputFields = currentNode?.node?.config?.inputFields || [];
-  const currentField = inputFields[inputFieldIndexRef.current] || null;
-  const inputPlaceholder = currentField?.fieldName || currentNode?.node?.name || "Type your message…";
+  const inputPlaceholder = currentNode?.node?.name || "Type your message…";
 
   /* ─── Render ───────────────────────────────────────────────────────────── */
   return (
@@ -260,14 +258,30 @@ export default function ChatBot() {
             </div>
           )}
 
-          {chat.map((msg, index) => (
-            <MessageRow
-              key={index}
-              msg={msg}
-              onOptionClick={handleOptionClick}
-              onWorkflowClick={handleWorkflowClick}
-            />
-          ))}
+          {chat.map((msg, index) => {
+            // Only the last bot message with buttons should be interactive
+            const hasButtons = msg.sender === "bot" &&
+              (msg.node?.node?.config?.nodeType === "buttons" || msg.node?.node?.config?.apiType === "buttons");
+            let isActiveButtons = false;
+            if (hasButtons) {
+              // Check if this is the last bot message with buttons in the chat
+              const lastBtnIndex = chat.findLastIndex((m) =>
+                m.sender === "bot" &&
+                (m.node?.node?.config?.nodeType === "buttons" || m.node?.node?.config?.apiType === "buttons")
+              );
+              isActiveButtons = index === lastBtnIndex;
+            }
+
+            return (
+              <MessageRow
+                key={index}
+                msg={msg}
+                disabled={hasButtons && !isActiveButtons}
+                onOptionClick={handleOptionClick}
+                onWorkflowClick={handleWorkflowClick}
+              />
+            );
+          })}
 
           {/* Typing indicator */}
           {isTyping && <TypingIndicator />}
@@ -279,27 +293,13 @@ export default function ChatBot() {
         <div className="cb-footer">
           {showInput ? (
             <>
-              {/* Show which field we're collecting */}
-              {currentField && (
-                <div style={{ marginBottom: 8, padding: "6px 12px", background: "#eef2ff", borderRadius: 8, fontSize: 12.5, color: "#4338ca", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 700 }}>📝 {currentField.fieldName}</span>
-                  <span style={{ color: "#818cf8", fontSize: 11 }}>
-                    → stores as <code style={{ background: "#e0e7ff", padding: "1px 5px", borderRadius: 4 }}>{currentField.variableName}</code>
-                  </span>
-                  {inputFields.length > 1 && (
-                    <span style={{ marginLeft: "auto", fontSize: 11, color: "#6366f1" }}>
-                      {inputFieldIndexRef.current + 1}/{inputFields.length}
-                    </span>
-                  )}
-                </div>
-              )}
               <div className="cb-input-row">
                 <input
                   ref={inputRef}
                   className="cb-text-input"
                   value={message}
                   placeholder={inputPlaceholder}
-                  type={currentField?.inputType || "text"}
+                  type="text"
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={handleKeyDown}
                   autoComplete="off"
@@ -313,12 +313,34 @@ export default function ChatBot() {
                   <SendIcon />
                 </button>
               </div>
-              <p className="cb-input-hint">Press Enter to send</p>
+              <div className="cb-footer-actions">
+                {canGoBack && (
+                  <button
+                    className="cb-back-btn"
+                    onClick={handleGoBack}
+                    disabled={!connected}
+                  >
+                    ⬅ Back
+                  </button>
+                )}
+                <p className="cb-input-hint">Press Enter to send</p>
+              </div>
             </>
           ) : (
-            <p className="cb-input-hint" style={{ margin: 0 }}>
-              {connected ? "Select an option above to continue" : "Waiting for connection…"}
-            </p>
+            <div className="cb-footer-actions">
+              {canGoBack && (
+                <button
+                  className="cb-back-btn"
+                  onClick={handleGoBack}
+                  disabled={!connected}
+                >
+                  ⬅ Back
+                </button>
+              )}
+              <p className="cb-input-hint" style={{ margin: 0 }}>
+                {connected ? "Select an option above to continue" : "Waiting for connection…"}
+              </p>
+            </div>
           )}
         </div>
 
@@ -350,12 +372,19 @@ function TypingIndicator() {
   );
 }
 
-function MessageRow({ msg, onOptionClick, onWorkflowClick }) {
+function MessageRow({ msg, disabled, onOptionClick, onWorkflowClick }) {
   const isUser = msg.sender === "user";
+  const isSystem = msg.sender === "system";
   const hasButtons = msg.sender === "bot" &&
     (msg.node?.node?.config?.nodeType === "buttons" || msg.node?.node?.config?.apiType === "buttons");
 
-    // console.log(msg)
+  if (isSystem) {
+    return (
+      <div className="cb-msg-row system">
+        <div className="cb-system-msg">{msg.text}</div>
+      </div>
+    );
+  }
 
   return (
     <div className={`cb-msg-row ${isUser ? "user" : "bot"}`}>
@@ -369,21 +398,21 @@ function MessageRow({ msg, onOptionClick, onWorkflowClick }) {
         <span className="cb-timestamp">{formatTime(msg.time)}</span>
 
         {/* Option / workflow buttons */}
-
         {hasButtons && (
-          <div className="cb-options">
-            {msg.node?.buttons?.map((btn, idx) => {
-              // Workflow button (has .id)
-              return (
-                <button
-                  key={btn.id}
-                  className="cb-option-btn"
-                  onClick={() => {msg?.node?.workflowsNode ? onWorkflowClick(btn) : onOptionClick(btn) }}
-                >
-                  {btn.name}
-                </button>
-              );
-            })}
+          <div className={`cb-options ${disabled ? "cb-options-disabled" : ""}`}>
+            {msg.node?.buttons?.map((btn) => (
+              <button
+                key={btn.id}
+                className="cb-option-btn"
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  msg?.node?.workflowsNode ? onWorkflowClick(btn) : onOptionClick(btn);
+                }}
+              >
+                {btn.name}
+              </button>
+            ))}
           </div>
         )}
       </div>

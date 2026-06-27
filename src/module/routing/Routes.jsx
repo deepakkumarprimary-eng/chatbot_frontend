@@ -11,7 +11,9 @@ const routes = createBrowserRouter([
     {
         element: <AppLayout />,
         children: [
-            { path: "/",                       element: <App /> },
+            { path: "/",                       element: <WorkflowList /> },
+            { path: "/builder",                element: <App /> },
+            { path: "/builder/edit/:id",       element: <App /> },
             { path: "/chatbot",                element: <ChatBot /> },
             { path: "/api-configs",            element: <ApiConfigList /> },
             { path: "/api-configs/new",        element: <ApiConfigForm /> },

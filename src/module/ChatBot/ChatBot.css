@@ -464,3 +464,77 @@
     max-width: 480px;
   }
 }
+
+/* ─── Back Button ────────────────────────────────────────────────────────── */
+.cb-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.cb-back-btn {
+  background: #fff;
+  border: 1.5px solid #94a3b8;
+  color: #475569;
+  border-radius: 18px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.cb-back-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #667eea;
+  color: #667eea;
+  transform: translateX(-2px);
+}
+
+.cb-back-btn:active:not(:disabled) {
+  transform: translateX(0) scale(0.96);
+}
+
+.cb-back-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── System Message (Back indicator) ────────────────────────────────────── */
+.cb-msg-row.system {
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.cb-system-msg {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+/* ─── Disabled option buttons (old/past messages) ────────────────────────── */
+.cb-options-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.cb-options-disabled .cb-option-btn {
+  cursor: not-allowed;
+  border-color: #cbd5e1;
+  color: #94a3b8;
+  background: #f8fafc;
+}
+
+.cb-options-disabled .cb-option-btn:hover {
+  background: #f8fafc;
+  color: #94a3b8;
+  border-color: #cbd5e1;
+  transform: none;
+  box-shadow: none;
+}

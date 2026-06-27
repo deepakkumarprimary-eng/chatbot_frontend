@@ -4,6 +4,48 @@
   backdrop-filter: blur(6px);
 }
 
+/* ─── ReactFlow Canvas 3D Enhancement ──────────────────────────────────── */
+.react-flow {
+  background: linear-gradient(135deg, #f8faff 0%, #eef2ff 50%, #f0f4ff 100%) !important;
+}
+
+.react-flow__edge-path {
+  filter: drop-shadow(0 1px 2px rgba(99, 102, 241, 0.2));
+}
+
+.react-flow__edge-textbg {
+  fill: #fff;
+  rx: 6;
+  stroke: #e2e8f0;
+  stroke-width: 1;
+}
+
+.react-flow__edge-text {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #4338ca;
+}
+
+.react-flow__handle {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.4);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+}
+
+.react-flow__controls {
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  border-bottom: 1px solid #f1f5f9;
+}
+
 /* Modal animation */
 .workflow-modal .modal-content {
   border: none;

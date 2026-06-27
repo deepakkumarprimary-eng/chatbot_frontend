@@ -188,6 +188,7 @@ function ConditionBranchEditor({ edge, index, nodes, contextVariables, loadingVa
             )}
 
             {/* Go-to node */}
+                      <div className="col-md-4">
             <Form.Group>
                 <Form.Label style={{ fontSize: 11.5, fontWeight: 600, color: "#475569" }}>
                     Go to Node
@@ -205,180 +206,6 @@ function ConditionBranchEditor({ edge, index, nodes, contextVariables, loadingVa
                     Any node — including start/API nodes for loop-back flows.
                 </Form.Text>
             </Form.Group>
-        </div>
-    );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   InputFieldsManager — dynamic input fields for input-type nodes
-   Each field has: fieldName (label shown to user) + variableName (storage key)
-───────────────────────────────────────────────────────────────────────────*/
-const EMPTY_INPUT_FIELD = { fieldName: "", variableName: "", inputType: "text" };
-
-const INPUT_TYPE_OPTIONS = [
-    { label: "Text",   value: "text" },
-    { label: "Number", value: "number" },
-    { label: "Email",  value: "email" },
-    { label: "Phone",  value: "tel" },
-    { label: "Date",   value: "date" },
-    { label: "Password", value: "password" },
-];
-
-function InputFieldsManager({ inputFields, onChange }) {
-    const [draft, setDraft] = useState(EMPTY_INPUT_FIELD);
-    const [showForm, setShowForm] = useState(false);
-    const [editIndex, setEditIndex] = useState(null);
-    const [draftError, setDraftError] = useState("");
-
-    const varNameValid = (v) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v.trim());
-
-    const saveDraft = () => {
-        if (!draft.fieldName.trim()) { setDraftError("Field label is required."); return; }
-        if (!draft.variableName.trim()) { setDraftError("Variable name is required."); return; }
-        if (!varNameValid(draft.variableName)) {
-            setDraftError("Variable name must start with a letter/underscore and contain only letters, numbers, underscores.");
-            return;
-        }
-        const duplicate = inputFields.some((f, i) => f.variableName === draft.variableName.trim() && i !== editIndex);
-        if (duplicate) { setDraftError(`Variable name "${draft.variableName}" is already used.`); return; }
-
-        const updated = editIndex !== null
-            ? inputFields.map((f, i) => i === editIndex ? { ...draft, variableName: draft.variableName.trim() } : f)
-            : [...inputFields, { ...draft, variableName: draft.variableName.trim() }];
-
-        onChange(updated);
-        setDraft(EMPTY_INPUT_FIELD);
-        setShowForm(false);
-        setEditIndex(null);
-        setDraftError("");
-    };
-
-    const removeField = (index) => onChange(inputFields.filter((_, i) => i !== index));
-
-    const startEdit = (index) => {
-        setDraft({ ...inputFields[index] });
-        setEditIndex(index);
-        setShowForm(true);
-        setDraftError("");
-    };
-
-    const cancelDraft = () => {
-        setDraft(EMPTY_INPUT_FIELD);
-        setShowForm(false);
-        setEditIndex(null);
-        setDraftError("");
-    };
-
-    return (
-        <div className="col-md-12 mb-3 mt-1">
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-
-                {/* Header */}
-                <div style={{ background: "linear-gradient(135deg,#f8faff,#f1f5ff)", borderBottom: "1px solid #e2e8f0", padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                        <span style={{ fontWeight: 700, fontSize: 14, color: "#1e293b" }}>Input Fields</span>
-                        <Badge bg="primary" style={{ marginLeft: 8, fontSize: 11 }}>{inputFields.length}</Badge>
-                        <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
-                            Define what the user will be asked to enter. Each field stores the response in a named variable.
-                        </div>
-                    </div>
-                    {!showForm && (
-                        <button onClick={() => { setShowForm(true); setEditIndex(null); setDraft(EMPTY_INPUT_FIELD); }}
-                            style={{ padding: "7px 14px", borderRadius: 8, border: "1.5px solid #6366f1", background: "#fff", color: "#6366f1", fontWeight: 600, fontSize: 13, cursor: "pointer", transition: "all 0.15s" }}>
-                            + Add Field
-                        </button>
-                    )}
-                </div>
-
-                {/* Draft / Edit form */}
-                {showForm && (
-                    <div style={{ padding: "16px 18px", background: "#fafbff", borderBottom: "1px solid #e2e8f0" }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 12 }}>
-                            {editIndex !== null ? `✏️ Edit Field ${editIndex + 1}` : "➕ New Input Field"}
-                        </div>
-                        <div className="row g-2">
-                            <div className="col-md-4">
-                                <Form.Label style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>
-                                    Field Label <span style={{ color: "#ef4444" }}>*</span>
-                                </Form.Label>
-                                <Form.Control size="sm" type="text" value={draft.fieldName}
-                                    placeholder="e.g. Enter your mobile number"
-                                    onChange={(e) => { setDraft((p) => ({ ...p, fieldName: e.target.value })); setDraftError(""); }} />
-                                <Form.Text style={{ fontSize: 11, color: "#64748b" }}>Shown to the user as the prompt.</Form.Text>
-                            </div>
-                            <div className="col-md-3">
-                                <Form.Label style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>
-                                    Store As Variable <span style={{ color: "#ef4444" }}>*</span>
-                                </Form.Label>
-                                <Form.Control size="sm" type="text" value={draft.variableName}
-                                    placeholder="e.g. mobile_no"
-                                    onChange={(e) => { setDraft((p) => ({ ...p, variableName: e.target.value })); setDraftError(""); }} />
-                                <Form.Text style={{ fontSize: 11, color: "#64748b" }}>Variable name (letters, numbers, _ only).</Form.Text>
-                            </div>
-                            <div className="col-md-3">
-                                <Form.Label style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>Input Type</Form.Label>
-                                <Form.Select size="sm" value={draft.inputType}
-                                    onChange={(e) => setDraft((p) => ({ ...p, inputType: e.target.value }))}>
-                                    {INPUT_TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                                </Form.Select>
-                            </div>
-                            <div className="col-md-2 d-flex align-items-end gap-2 pb-1">
-                                <button onClick={saveDraft}
-                                    disabled={!draft.fieldName.trim() || !draft.variableName.trim()}
-                                    style={{ padding: "6px 14px", borderRadius: 7, border: "none", background: "#6366f1", color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", opacity: (!draft.fieldName.trim() || !draft.variableName.trim()) ? 0.5 : 1 }}>
-                                    Save
-                                </button>
-                                <button onClick={cancelDraft}
-                                    style={{ padding: "6px 12px", borderRadius: 7, border: "1.5px solid #cbd5e1", background: "#fff", color: "#64748b", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
-                                    ✕
-                                </button>
-                            </div>
-                        </div>
-                        {draftError && <div style={{ marginTop: 8, fontSize: 12, color: "#dc3545" }}>⚠ {draftError}</div>}
-                    </div>
-                )}
-
-                {/* Field list */}
-                {inputFields.length === 0 && !showForm ? (
-                    <div style={{ padding: "24px 18px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
-                        No input fields yet. Click <strong>+ Add Field</strong> to define what the user will enter.
-                    </div>
-                ) : (
-                    <div style={{ padding: inputFields.length ? "12px 18px" : 0 }}>
-                        {inputFields.map((field, index) => (
-                            <div key={index} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 9, border: "1px solid #e2e8f0", background: "#fafafa", marginBottom: 8 }}>
-                                {/* Order badge */}
-                                <span style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#6366f1", color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                    {index + 1}
-                                </span>
-                                {/* Field info */}
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, fontSize: 13.5, color: "#1e293b", marginBottom: 2 }}>{field.fieldName}</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                        <span style={{ fontSize: 11.5, color: "#64748b" }}>stores in:</span>
-                                        <code style={{ fontSize: 12, background: "#eef2ff", color: "#4338ca", padding: "1px 7px", borderRadius: 5, fontWeight: 700 }}>
-                                            {field.variableName}
-                                        </code>
-                                        <Badge bg="light" text="dark" style={{ fontSize: 10.5, border: "1px solid #e2e8f0" }}>
-                                            {INPUT_TYPE_OPTIONS.find((t) => t.value === field.inputType)?.label || "Text"}
-                                        </Badge>
-                                    </div>
-                                </div>
-                                {/* Actions */}
-                                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                                    <button onClick={() => startEdit(index)}
-                                        style={{ padding: "4px 10px", borderRadius: 6, border: "1.5px solid #6366f1", background: "#fff", color: "#6366f1", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                                        Edit
-                                    </button>
-                                    <button onClick={() => removeField(index)}
-                                        style={{ padding: "4px 10px", borderRadius: 6, border: "1.5px solid #fca5a5", background: "#fff", color: "#dc2626", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                                        Remove
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -514,7 +341,7 @@ const NodeDetails = ({ selectedNode, nodes, setNodes, edges, setEdges }) => {
                         <div style={{ fontWeight: 700, fontSize: 14, color: "#0f766e", marginBottom: 12 }}>🔗 Linked Workflow</div>
                         <Form.Group>
                             <Form.Label style={{ fontSize: 13, fontWeight: 600 }}>Select Workflow to Link</Form.Label>
-                            <Form.Select value={currentNode?.data?.linkedWorkflowId || ""}
+                            <Form.Select value={String(currentNode?.data?.linkedWorkflowId || "")}
                                 onChange={(e) => {
                                     const wf = workflowList.find((w) => String(w.id) === e.target.value);
                                     updateNode("linkedWorkflowId", e.target.value);
@@ -559,10 +386,23 @@ const NodeDetails = ({ selectedNode, nodes, setNodes, edges, setEdges }) => {
 
             {/* ── INPUT node ──────────────────────────────────────────── */}
             {currentNode?.data?.config?.isNodeConfigRequired && currentNode?.data?.config?.nodeType === "input" && (
-                <InputFieldsManager
-                    inputFields={currentNode?.data?.config?.inputFields || []}
-                    onChange={(fields) => updateNodeConfig("inputFields", fields)}
-                />
+                <div className="col-md-4 mb-3">
+                    <Form.Group>
+                        <Form.Label style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
+                            Variable Name <span style={{ color: "#ef4444" }}>*</span>
+                        </Form.Label>
+                        <Form.Control
+                            size="sm"
+                            type="text"
+                            value={currentNode?.data?.config?.variableName || ""}
+                            placeholder="e.g. user_id"
+                            onChange={(e) => updateNodeConfig("variableName", e.target.value)}
+                        />
+                        <Form.Text style={{ fontSize: 11, color: "#64748b" }}>
+                            The user's input will be stored in this variable.
+                        </Form.Text>
+                    </Form.Group>
+                </div>
             )}
 
             {/* ── API node ─────────────────────────────────────────────── */}

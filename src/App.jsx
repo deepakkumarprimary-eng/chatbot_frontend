@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -9,39 +9,82 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
+  MarkerType,
 } from "@xyflow/react";
-import { Modal, Button, Form } from "react-bootstrap";
+import { Modal, Button, Form, Spinner } from "react-bootstrap";
+import { useParams, useNavigate } from "react-router-dom";
 
 import "@xyflow/react/dist/style.css";
 import { DecisionNode } from "./module/DecisionNode";
 import { WorkflowNode } from "./module/WorkflowNode";
 import NodeDetails from "./module/NodeDetails";
+import { WorkflowService } from "./module/workflow/WorkflowService";
 
-/* ─── StateNode ─────────────────────────────────────────────────────────── */
+/* ─── Default edge options for flowchart-style routing ─────────────────── */
+const defaultEdgeOptions = {
+  type: "smoothstep",
+  animated: true,
+  style: { stroke: "#6366f1", strokeWidth: 2.5 },
+  markerEnd: {
+    type: MarkerType.ArrowClosed,
+    color: "#6366f1",
+    width: 18,
+    height: 18,
+  },
+  pathOptions: { offset: 20, borderRadius: 12 },
+};
+
+/* ─── StateNode (3D design) ─────────────────────────────────────────────── */
 function StateNode({ id, data }) {
   return (
     <div
       style={{
-        background: "#4f63ff",
+        background: "linear-gradient(145deg, #6371ff, #4350e6)",
         color: "#fff",
-        padding: "16px",
-        borderRadius: 10,
-        minWidth: 180,
+        padding: "18px 22px",
+        borderRadius: 14,
+        minWidth: 190,
         textAlign: "center",
         position: "relative",
-        boxShadow: "0 4px 12px rgba(79,99,255,0.35)",
+        boxShadow:
+          "0 8px 24px rgba(79,99,255,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)",
+        border: "1px solid rgba(255,255,255,0.15)",
+        transform: "perspective(800px) rotateX(2deg)",
+        transition: "transform 0.2s ease, box-shadow 0.2s ease",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = "perspective(800px) rotateX(0deg) translateY(-2px)";
+        e.currentTarget.style.boxShadow = "0 12px 32px rgba(79,99,255,0.5), 0 4px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.25)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "perspective(800px) rotateX(2deg)";
+        e.currentTarget.style.boxShadow = "0 8px 24px rgba(79,99,255,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)";
       }}
     >
-      <Handle type="target" position={Position.Top} />
-      <div style={{ fontWeight: 600, marginBottom: 10 }}>{data.label}</div>
+      <Handle type="target" position={Position.Top} style={{ background: "#a5b4fc", width: 10, height: 10, border: "2px solid #fff" }} />
+      {/* 3D top highlight */}
+      <div style={{
+        position: "absolute", top: 0, left: 0, right: 0, height: "40%",
+        background: "linear-gradient(180deg, rgba(255,255,255,0.12) 0%, transparent 100%)",
+        borderRadius: "14px 14px 0 0", pointerEvents: "none",
+      }} />
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, textShadow: "0 1px 2px rgba(0,0,0,0.2)" }}>
+        {data.label}
+      </div>
       <button
         className="nodrag nopan"
         onClick={(e) => { e.stopPropagation(); data.onAdd(id); }}
-        style={{ width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer", fontSize: 18 }}
+        style={{
+          width: 28, height: 28, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.4)",
+          cursor: "pointer", fontSize: 16, lineHeight: 1,
+          background: "rgba(255,255,255,0.15)", color: "#fff",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+          transition: "background 0.15s",
+        }}
       >
         +
       </button>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Bottom} style={{ background: "#a5b4fc", width: 10, height: 10, border: "2px solid #fff" }} />
     </div>
   );
 }
@@ -54,6 +97,10 @@ const nodeTypes = {
 
 /* ─── App ───────────────────────────────────────────────────────────────── */
 export default function App() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const isEdit = Boolean(id);
+
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -66,12 +113,96 @@ export default function App() {
   const nameInputRef = useRef(null);
 
   const [saving, setSaving] = useState(false);
+  const [loadingWorkflow, setLoadingWorkflow] = useState(isEdit);
+  const [workflowId, setWorkflowId] = useState(id || null);
+
+  /* ── Load existing workflow for edit ──────────────────────────────────── */
+  useEffect(() => {
+    if (!isEdit) return;
+    (async () => {
+      try {
+        setLoadingWorkflow(true);
+        const { data } = await WorkflowService.getById(id);
+        setWorkflowName(data.name || "");
+        setWorkflowId(data.id);
+
+        const wfJson = data.workflowJson;
+        if (wfJson) {
+          // Fetch workflow list to resolve linked workflow names
+          let workflowLookup = {};
+          try {
+            const wfListRes = await WorkflowService.getAll();
+            workflowLookup = Object.fromEntries(
+              (wfListRes.data || []).map((w) => [String(w.id), w.name])
+            );
+          } catch { /* ignore — names will just be empty */ }
+
+          // Restore nodes
+          const restoredNodes = (wfJson.nodes || []).map((n) => {
+            // Determine the correct ReactFlow node type
+            let nodeType = n.type || "state";
+            if (nodeType === "state" && n.config?.nodeType === "workflow") {
+              nodeType = "workflow";
+            }
+
+            // Resolve linked workflow ID from config or top-level
+            const rawLinkedId = n.linkedWorkflowId || n.config?.workflowId || null;
+            const linkedWorkflowId = rawLinkedId ? String(rawLinkedId) : null;
+            const linkedWorkflowName = n.linkedWorkflowName
+              || (linkedWorkflowId ? workflowLookup[linkedWorkflowId] : null)
+              || null;
+
+            return {
+              id: n.id,
+              type: nodeType,
+              position: n.position || { x: 0, y: 0 },
+              data: {
+                label: n.name || n.id,
+                config: n.config || { isNodeConfigRequired: false, nodeType: undefined, headers: [] },
+                displayVariable: n.displayVariable || null,
+                linkedWorkflowId: linkedWorkflowId,
+                linkedWorkflowName: linkedWorkflowName,
+              },
+            };
+          });
+
+          // Restore edges
+          const restoredEdges = (wfJson.transitions || []).map((t) => ({
+            id: t.id,
+            source: t.sourceNodeId,
+            target: t.targetNodeId,
+            type: "smoothstep",
+            animated: true,
+            style: { stroke: "#6366f1", strokeWidth: 2.5 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#6366f1", width: 18, height: 18 },
+            data: { condition: t.condition || "" },
+            label: t.condition || undefined,
+          }));
+
+          setNodes(restoredNodes);
+          setEdges(restoredEdges);
+        }
+      } catch (error) {
+        alert("Failed to load workflow: " + (error?.response?.data?.message || error.message));
+        navigate("/workflows");
+      } finally {
+        setLoadingWorkflow(false);
+      }
+    })();
+  }, [id, isEdit]);
 
   /* ── onConnect — allows manual drag-connections for loop-back edges ───── */
   const onConnect = useCallback(
     (params) =>
       setEdges((eds) =>
-        addEdge({ ...params, data: { condition: "" } }, eds)
+        addEdge({
+          ...params,
+          type: "smoothstep",
+          animated: true,
+          style: { stroke: "#6366f1", strokeWidth: 2.5 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: "#6366f1", width: 18, height: 18 },
+          data: { condition: "" },
+        }, eds)
       ),
     [setEdges]
   );
@@ -85,6 +216,13 @@ export default function App() {
       const outgoingEdges = edges.filter((e) => e.source === parentId);
       const newNodeId = Date.now().toString();
 
+      const edgeStyle = {
+        type: "smoothstep",
+        animated: true,
+        style: { stroke: "#6366f1", strokeWidth: 2.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#6366f1", width: 18, height: 18 },
+      };
+
       if (outgoingEdges.length === 0) {
         setNodes((nds) => [
           ...nds,
@@ -95,7 +233,7 @@ export default function App() {
             data: { label: "New State", config: { isNodeConfigRequired: false, nodeType: undefined, headers: [] } },
           },
         ]);
-        setEdges((eds) => [...eds, { id: `${parentId}-${newNodeId}`, source: parentId, target: newNodeId, data: { condition: "" } }]);
+        setEdges((eds) => [...eds, { id: `${parentId}-${newNodeId}`, source: parentId, target: newNodeId, data: { condition: "" }, ...edgeStyle }]);
         return;
       }
 
@@ -112,7 +250,7 @@ export default function App() {
             data: { label: "New State", config: { isNodeConfigRequired: false, nodeType: undefined, headers: [] } },
           },
         ]);
-        setEdges((eds) => [...eds, { id: `${existingDecision.id}-${newNodeId}`, source: existingDecision.id, target: newNodeId, data: { condition: "" } }]);
+        setEdges((eds) => [...eds, { id: `${existingDecision.id}-${newNodeId}`, source: existingDecision.id, target: newNodeId, data: { condition: "" }, ...edgeStyle }]);
         return;
       }
 
@@ -133,9 +271,9 @@ export default function App() {
         const filtered = eds.filter((e) => e.id !== outgoingEdges[0].id);
         return [
           ...filtered,
-          { id: `${parentId}-${decisionId}`, source: parentId, target: decisionId },
-          { id: `${decisionId}-${existingTarget}`, source: decisionId, target: existingTarget, data: { condition: "Condition 1" }, label: "Condition 1" },
-          { id: `${decisionId}-${newNodeId}`, source: decisionId, target: newNodeId, data: { condition: "Condition 2" }, label: "Condition 2" },
+          { id: `${parentId}-${decisionId}`, source: parentId, target: decisionId, ...edgeStyle },
+          { id: `${decisionId}-${existingTarget}`, source: decisionId, target: existingTarget, data: { condition: "Condition 1" }, label: "Condition 1", ...edgeStyle },
+          { id: `${decisionId}-${newNodeId}`, source: decisionId, target: newNodeId, data: { condition: "Condition 2" }, label: "Condition 2", ...edgeStyle },
         ];
       });
     },
@@ -144,7 +282,7 @@ export default function App() {
 
   /* ── Add a Workflow Link node ─────────────────────────────────────────── */
   const addWorkflowNode = () => {
-    const id = `workflow-${Date.now()}`;
+    const nodeId = `workflow-${Date.now()}`;
     // Place near the centre of the current view
     const lastNode = nodes[nodes.length - 1];
     const position = lastNode
@@ -154,7 +292,7 @@ export default function App() {
     setNodes((nds) => [
       ...nds,
       {
-        id,
+        id: nodeId,
         type: "workflow",
         position,
         data: {
@@ -186,8 +324,8 @@ export default function App() {
     if (trimmed.length > 100) { setWorkflowNameError("Name must be 100 characters or fewer."); return; }
 
     setShowNameModal(false);
-    const id = Date.now().toString();
-    setNodes([{ id, type: "state", position: { x: 300, y: 100 }, data: { label: "Start State" } }]);
+    const startNodeId = Date.now().toString();
+    setNodes([{ id: startNodeId, type: "state", position: { x: 300, y: 100 }, data: { label: "Start State" } }]);
     setEdges([]);
   };
 
@@ -210,17 +348,29 @@ export default function App() {
     const workflowData = {
       name: workflowName.trim(),
       workflowJson: {
-        nodes: nodes.map((node) => ({
-          id: node.id,
-          type: node.type,
-          name: node.data.label,
-          position: node.position,
-          config: node.data.config || null,
-          displayVariable: node.data.displayVariable || null,
-          // Workflow link node specific
-          linkedWorkflowId: node.data.linkedWorkflowId || null,
-          decision: node.type === "decision" ? { label: node.data.label } : null,
-        })),
+        nodes: nodes.map((node) => {
+          const config = node.data.config ? { ...node.data.config } : null;
+
+          // For workflow link nodes, ensure workflowId is stored in config
+          if (node.type === "workflow" && node.data.linkedWorkflowId) {
+            if (config) {
+              config.nodeType = "workflow";
+              config.workflowId = node.data.linkedWorkflowId;
+            }
+          }
+
+          return {
+            id: node.id,
+            type: node.type,
+            name: node.data.label,
+            position: node.position,
+            config: config,
+            displayVariable: node.data.displayVariable || null,
+            linkedWorkflowId: node.data.linkedWorkflowId || null,
+            linkedWorkflowName: node.data.linkedWorkflowName || null,
+            decision: node.type === "decision" ? { label: node.data.label } : null,
+          };
+        }),
         transitions: edges.map((edge) => ({
           id: edge.id,
           sourceNodeId: edge.source,
@@ -232,18 +382,24 @@ export default function App() {
 
     try {
       setSaving(true);
-      const res = await fetch("http://localhost:8080/api/workflows", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(workflowData),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "Save failed");
+      let res;
+      if (workflowId) {
+        // Update existing workflow
+        res = await WorkflowService.update(workflowId, workflowData);
+      } else {
+        // Create new workflow
+        res = await WorkflowService.create(workflowData);
+        // Store the ID for subsequent saves
+        if (res.data?.id) {
+          setWorkflowId(res.data.id);
+          // Update URL to reflect edit mode without full reload
+          navigate(`/builder/edit/${res.data.id}`, { replace: true });
+        }
       }
-      alert("Workflow saved successfully");
+      alert(`Workflow ${workflowId ? "updated" : "saved"} successfully`);
     } catch (error) {
-      alert(`Failed to save workflow: ${error.message}`);
+      const msg = error?.response?.data?.message || error?.message || "Save failed";
+      alert(`Failed to save workflow: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -257,6 +413,15 @@ export default function App() {
   };
 
   /* ─── Render ─────────────────────────────────────────────────────────── */
+  if (loadingWorkflow) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}>
+        <Spinner animation="border" variant="primary" />
+        <span style={{ marginLeft: 12, fontSize: 15, color: "#6c757d" }}>Loading workflow…</span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div style={{ display: "flex", height: "100%" }}>
@@ -269,7 +434,7 @@ export default function App() {
               display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
             }}
           >
-            {nodes.length === 0 ? (
+            {nodes.length === 0 && !isEdit ? (
               <button
                 onClick={openNameModal}
                 style={{
@@ -291,6 +456,7 @@ export default function App() {
                     fontWeight: 600, fontSize: 13,
                   }}>
                     📋 {workflowName}
+                    {isEdit && <span style={{ marginLeft: 6, fontSize: 11, color: "#6366f1" }}>(editing)</span>}
                   </span>
                 )}
 
@@ -308,14 +474,14 @@ export default function App() {
                   🔗 Add Workflow Link
                 </button>
 
-                {/* Save */}
+                {/* Save / Update */}
                 <button
                   className="btn btn-success"
                   style={{ padding: "8px 18px", fontWeight: 600 }}
                   onClick={saveWorkflow}
                   disabled={saving}
                 >
-                  {saving ? "Saving…" : "💾 Save Workflow"}
+                  {saving ? "Saving…" : workflowId ? "💾 Update Workflow" : "💾 Save Workflow"}
                 </button>
               </>
             )}
@@ -325,15 +491,26 @@ export default function App() {
             nodes={nodesWithActions}
             edges={edges}
             nodeTypes={nodeTypes}
+            defaultEdgeOptions={defaultEdgeOptions}
+            connectionLineType="smoothstep"
+            connectionLineStyle={{ stroke: "#6366f1", strokeWidth: 2 }}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeClick={handleNodeClick}
             fitView
           >
-            <Background />
+            <Background variant="dots" gap={20} size={1.5} color="#d1d5db" />
             <Controls />
-            <MiniMap />
+            <MiniMap
+              nodeColor={(n) => {
+                if (n.type === "decision") return "#f59e0b";
+                if (n.type === "workflow") return "#0d9488";
+                return "#6366f1";
+              }}
+              maskColor="rgba(0,0,0,0.08)"
+              style={{ borderRadius: 12, border: "1px solid #e2e8f0" }}
+            />
           </ReactFlow>
         </div>
       </div>

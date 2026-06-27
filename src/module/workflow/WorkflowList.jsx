@@ -58,9 +58,14 @@ export default function WorkflowList() {
                     <h4 className="mb-0 fw-bold">Workflows</h4>
                     <small className="text-muted">Build and manage chatbot conversation flows</small>
                 </div>
-                <Button variant="primary" onClick={() => navigate("/workflows/new")}>
-                    + New Workflow
-                </Button>
+                <div className="d-flex gap-2">
+                    <Button variant="outline-primary" onClick={() => navigate("/builder")}>
+                        🛠️ Create with Builder
+                    </Button>
+                    <Button variant="primary" onClick={() => navigate("/workflows/new")}>
+                        + New Workflow Without Builder 
+                    </Button>
+                </div>
             </div>
 
             {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
@@ -77,7 +82,14 @@ export default function WorkflowList() {
                     <div style={{ fontSize: 48 }}>🗂️</div>
                     <h5 className="mt-3">No workflows yet</h5>
                     <p className="mb-3">Create your first workflow to power the chatbot.</p>
-                    <Button variant="primary" onClick={() => navigate("/workflows/new")}>Create Workflow</Button>
+                    <div className="d-flex justify-content-center gap-2">
+                        <Button variant="outline-primary" onClick={() => navigate("/builder")}>
+                            🛠️ Create with Builder
+                        </Button>
+                        <Button variant="primary" onClick={() => navigate("/workflows/new")}>
+                            Create Workflow
+                        </Button>
+                    </div>
                 </div>
 
             /* ── Table ───────────────────────────────────────────────── */
@@ -120,6 +132,10 @@ export default function WorkflowList() {
                                             <Button size="sm" variant="outline-secondary"
                                                 onClick={() => setPreview(wf)}>
                                                 View
+                                            </Button>
+                                            <Button size="sm" variant="outline-info"
+                                                onClick={() => navigate(`/builder/edit/${wf.id}`)}>
+                                                Builder
                                             </Button>
                                             <Button size="sm" variant="outline-primary"
                                                 onClick={() => navigate(`/workflows/edit/${wf.id}`)}>
@@ -186,9 +202,13 @@ export default function WorkflowList() {
                     )}
                 </Modal.Body>
                 <Modal.Footer style={{ borderTop: "1px solid #e5e7eb", padding: "12px 20px", gap: 8 }}>
+                    <Button variant="outline-info"
+                        onClick={() => { setPreview(null); navigate(`/builder/edit/${preview?.id}`); }}>
+                        Open in Builder
+                    </Button>
                     <Button variant="outline-primary"
                         onClick={() => { setPreview(null); navigate(`/workflows/edit/${preview?.id}`); }}>
-                        Edit this workflow
+                        Edit JSON
                     </Button>
                     <Button variant="outline-secondary" onClick={() => setPreview(null)}>Close</Button>
                 </Modal.Footer>

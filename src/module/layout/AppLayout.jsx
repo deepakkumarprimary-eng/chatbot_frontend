@@ -13,13 +13,10 @@ export default function AppLayout() {
     return (
         <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <Navbar bg="dark" variant="dark" expand="lg" className="px-3 py-2" style={{ flexShrink: 0 }}>
-                <Navbar.Brand href="/" className="fw-bold me-4">🤖 Chatbot Studio</Navbar.Brand>
+                <Navbar.Brand href="/workflows" className="fw-bold me-4">🤖 Chatbot Studio</Navbar.Brand>
                 <Navbar.Toggle aria-controls="main-nav" />
                 <Navbar.Collapse id="main-nav">
                     <Nav className="me-auto gap-1">
-                        <Nav.Link as={NavLink} to="/" end style={linkStyle}>
-                            Workflow Builder
-                        </Nav.Link>
                         <Nav.Link as={NavLink} to="/workflows" style={linkStyle}>
                             Workflows
                         </Nav.Link>
