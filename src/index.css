@@ -1,0 +1,67 @@
+/* ─── Base reset ─────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── ReactFlow Canvas ───────────────────────────────────────────────────── */
+.react-flow {
+  background: linear-gradient(135deg, #f8faff 0%, #eef2ff 50%, #f0f4ff 100%) !important;
+}
+.react-flow__edge-path { filter: drop-shadow(0 1px 2px rgba(99,102,241,0.2)); }
+.react-flow__edge-textbg { fill: #fff; rx: 6; stroke: #e2e8f0; stroke-width: 1; }
+.react-flow__edge-text { font-size: 11px; font-weight: 600; fill: #4338ca; }
+.react-flow__handle { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.react-flow__handle:hover { transform: scale(1.4); box-shadow: 0 0 0 4px rgba(99,102,241,0.2); }
+.react-flow__controls { border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden; }
+.react-flow__controls-button { border-bottom: 1px solid #f1f5f9; }
+
+/* ─── Modal backdrop blur ────────────────────────────────────────────────── */
+.modal-backdrop.show { opacity: 0.75 !important; backdrop-filter: blur(6px); }
+
+/* ─── Workflow Node Settings Modal ───────────────────────────────────────── */
+.workflow-modal .modal-content {
+  border: none;
+  border-radius: 24px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 25px 60px rgba(0,0,0,0.25), 0 10px 20px rgba(0,0,0,0.1);
+  animation: modalSlide 0.35s ease;
+}
+@keyframes modalSlide {
+  from { opacity: 0; transform: translateY(40px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.workflow-content {
+  background: linear-gradient(135deg, #ffffff, #f8faff) !important;
+}
+.workflow-header {
+  position: sticky; top: 0; z-index: 10;
+  background: white; border-bottom: 1px solid #ececec; padding: 20px 30px;
+}
+.workflow-header .modal-title { font-size: 24px; font-weight: 700; color: #222; }
+.workflow-body {
+  max-height: 70vh; overflow-y: auto; padding: 30px;
+}
+.workflow-body::-webkit-scrollbar { width: 8px; }
+.workflow-body::-webkit-scrollbar-track { background: transparent; }
+.workflow-body::-webkit-scrollbar-thumb { background: #cfcfcf; border-radius: 50px; }
+.workflow-body::-webkit-scrollbar-thumb:hover { background: #999; }
+.workflow-footer {
+  position: sticky; bottom: 0;
+  background: white; border-top: 1px solid #ececec; padding: 18px 24px;
+}
+.workflow-footer .btn { min-width: 150px; border-radius: 12px; font-weight: 600; padding: 10px 20px; transition: all 0.25s ease; }
+.workflow-footer .btn:hover { transform: translateY(-2px); }
+
+@media (max-width: 768px) {
+  .workflow-modal { margin: 10px; }
+  .workflow-body  { padding: 20px; }
+}
