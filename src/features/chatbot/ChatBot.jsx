@@ -1,16 +1,63 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Client } from "@stomp/stompjs";
-import SockJS from "sockjs-client";
-import { WS_URL, WS_API_KEY } from "../../api/index.js";
 import "./ChatBot.css";
 
+// ─── Profile definitions ──────────────────────────────────────────────────────
+// Each profile's values come straight from the active .env file:
+//   .env.development  →  npm run dev
+//   .env.staging      →  vite --mode staging
+//   .env.production   →  vite build
+//
+// When the user switches profiles at runtime the hardcoded fallbacks are used
+// for the non-active environments (useful for testing cross-env from one build).
+
+const PROFILES = {
+  dev: {
+    label: "Dev",
+    badge: "DEV",
+    color: "#16a34a",
+    wsUrl:      import.meta.env.MODE === "development" ? import.meta.env.VITE_WS_URL      : "ws://localhost:8080/ws",
+    wsApiKey:   import.meta.env.MODE === "development" ? import.meta.env.VITE_WS_API_KEY  : "dev-api-key-12345",
+    apiBaseUrl: import.meta.env.MODE === "development" ? import.meta.env.VITE_API_BASE_URL : "http://localhost:8080",
+  },
+  stage: {
+    label: "Stage",
+    badge: "STG",
+    color: "#d97706",
+    wsUrl:      import.meta.env.MODE === "staging" ? import.meta.env.VITE_WS_URL      : "wss://stage.yourapp.com/ws",
+    wsApiKey:   import.meta.env.MODE === "staging" ? import.meta.env.VITE_WS_API_KEY  : "stage-api-key-67890",
+    apiBaseUrl: import.meta.env.MODE === "staging" ? import.meta.env.VITE_API_BASE_URL : "https://stage.yourapp.com",
+  },
+  live: {
+    label: "Live",
+    badge: "LIVE",
+    color: "#dc2626",
+    wsUrl:      import.meta.env.MODE === "production" ? import.meta.env.VITE_WS_URL      : "wss://api.yourapp.com/ws",
+    wsApiKey:   import.meta.env.MODE === "production" ? import.meta.env.VITE_WS_API_KEY  : "",
+    apiBaseUrl: import.meta.env.MODE === "production" ? import.meta.env.VITE_API_BASE_URL : "https://api.yourapp.com",
+  },
+};
+
+// Pre-select the profile that matches the current build mode, with "dev" as fallback
+const DEFAULT_PROFILE =
+  PROFILES[import.meta.env.VITE_DEFAULT_PROFILE] !== undefined
+    ? import.meta.env.VITE_DEFAULT_PROFILE
+    : "dev";
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function ChatBot() {
-  const [stompClient, setStompClient] = useState(null);
-  const [connected,   setConnected]   = useState(false);
-  const [message,     setMessage]     = useState("");
-  const [chat,        setChat]        = useState([]);
-  const [currentNode, setCurrentNode] = useState(null);
-  const [sessionId,   setSessionId]   = useState(null);
+  // ── Profile state ──────────────────────────────────────────────────────────
+  const [activeProfile,    setActiveProfile]    = useState(DEFAULT_PROFILE);
+  const [showProfileMenu,  setShowProfileMenu]  = useState(false);
+
+  // ── Chat state ─────────────────────────────────────────────────────────────
+  const [stompClient,      setStompClient]      = useState(null);
+  const [connected,        setConnected]        = useState(false);
+  const [message,          setMessage]          = useState("");
+  const [chat,             setChat]             = useState([]);
+  const [currentNode,      setCurrentNode]      = useState(null);
+  const [sessionId,        setSessionId]        = useState(null);
   const [isTyping,         setIsTyping]         = useState(false);
   const [canGoBack,        setCanGoBack]        = useState(false);
   const [completed,        setCompleted]        = useState(false);
@@ -18,126 +65,40 @@ export default function ChatBot() {
 
   const chatEndRef       = useRef(null);
   const inputRef         = useRef(null);
-  // Persist sessionId across reconnects
   const sessionIdRef     = useRef(null);
   const currentNodeRef   = useRef(null);
-  const workflowsNodeRef = useRef(null); // cached workflow-selection node
-  const stompClientRef   = useRef(null); // ref so handleMainMenu can access client
+  const workflowsNodeRef = useRef(null);
+  const stompClientRef   = useRef(null);
 
-  // Keep refs in sync so STOMP callbacks always read latest values
-  useEffect(() => { sessionIdRef.current  = sessionId;  }, [sessionId]);
+  useEffect(() => { sessionIdRef.current   = sessionId;   }, [sessionId]);
   useEffect(() => { currentNodeRef.current = currentNode; }, [currentNode]);
 
-  /* ── WebSocket setup ───────────────────────────────────────────────────── */
-  useEffect(() => {
-    const client = new Client({
-      webSocketFactory: () => new SockJS(WS_URL),
-      reconnectDelay: 5000,
-      debug: () => {},
-      // ── API key sent on every STOMP CONNECT frame ──────────────────────
-      // Backend WebSocketAuthInterceptor reads accessor.getFirstNativeHeader("X-API-Key")
-      connectHeaders: {
-        "X-API-Key": WS_API_KEY,
-      },
-
-      onConnect: () => {
-        setConnected(true);
-        const existingSessionId = sessionIdRef.current;
-
-        if (existingSessionId) {
-          // ── Reconnect to existing session ───────────────────────────────
-          client.subscribe(`/topic/chat/${existingSessionId}`, handleTopicMessage);
-          client.publish({
-            destination: "/app/chat.reconnect",
-            body: JSON.stringify({ sessionId: existingSessionId }),
-          });
-          setChat((prev) => [
-            ...prev,
-            { sender: "system", text: "🔄 Reconnected to server", time: new Date() },
-          ]);
-        } else {
-          // ── Fresh session init ──────────────────────────────────────────
-          client.subscribe("/app/chat.init", (response) => {
-            const data = JSON.parse(response.body);
-            setSessionId(data.sessionId);
-            sessionIdRef.current = data.sessionId;
-
-            // Subscribe to session topic
-            client.subscribe(`/topic/chat/${data.sessionId}`, handleTopicMessage);
-
-            // Show workflow list as first message
-            if (data.workflows?.length > 0) {
-              const node = {
-                workflowsNode: true,
-                node: { ...data.workflows[0], config: { nodeType: "buttons" } },
-                buttons: data.workflows,
-              };
-              setCurrentNode(node);
-              workflowsNodeRef.current = node; // cache for Main Menu
-              setChat([{
-                sender: "bot",
-                text: "👋 Hi! I'm your assistant. Please select a workflow to get started:",
-                node,
-                time: new Date(),
-              }]);
-            }
-          });
-          client.publish({ destination: "/app/chat.init", body: "{}" });
-        }
-      },
-
-      onDisconnect: () => setConnected(false),
-      onStompError: () => setConnected(false),
-    });
-
-    client.activate();
-    setStompClient(client);
-    stompClientRef.current = client; // store in ref for handleMainMenu
-    return () => client.deactivate();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ── Handle incoming topic message ────────────────────────────────────── */
+  /* ── Incoming topic message ────────────────────────────────────────────── */
   const handleTopicMessage = useCallback((msg) => {
     let responseData = JSON.parse(msg.body);
-    console.log("Received message:", responseData);
 
-    // Error response from backend
     if (responseData?.error) {
       setIsTyping(false);
-      setChat((prev) => [...prev, {
-        sender: "system",
-        text: `⚠️ ${responseData.error}`,
-        time: new Date(),
-      }]);
+      setChat((prev) => [...prev, { sender: "system", text: `⚠️ ${responseData.error}`, time: new Date() }]);
       return;
     }
 
-    // Completed workflow
     if (responseData?.completed === true) {
       setIsTyping(false);
       setCompleted(true);
       setCurrentNode(null);
-      setChat((prev) => [...prev, {
-        sender: "bot",
-        text: responseData.response || "✅ Workflow completed. Thank you!",
-        node: responseData,
-        time: new Date(),
-      }, {
-        sender: "system",
-        text: "✅ This workflow has completed. Click Restart to begin again.",
-        time: new Date(),
-      }]);
+      setChat((prev) => [...prev,
+        { sender: "bot",    text: responseData.response || "✅ Workflow completed. Thank you!", node: responseData, time: new Date() },
+        { sender: "system", text: "✅ This workflow has completed. Click Restart to begin again.", time: new Date() },
+      ]);
       return;
     }
 
-    // Button-type API responses: parse button list
     if (responseData?.node?.config?.nodeType === "buttons" || responseData?.node?.config?.apiType === "buttons") {
-      const buttons = responseData.response
+      responseData.buttons = responseData.response
         .split("\n")
         .filter((item) => item.trim())
         .map((item) => ({ name: item.trim(), id: item.trim() }));
-      responseData.buttons = buttons;
     }
 
     setCurrentNode(responseData);
@@ -145,63 +106,133 @@ export default function ChatBot() {
 
     if (responseData?.node?.config?.nodeType === "api") {
       if (responseData?.node?.config?.apiType === "buttons") {
-        setChat((prev) => [...prev, {
-          sender: "bot",
-          text: responseData?.node?.name,
-          node: responseData,
-          time: new Date(),
-        }]);
+        setChat((prev) => [...prev, { sender: "bot", text: responseData?.node?.name, node: responseData, time: new Date() }]);
       }
     } else {
       setChat((prev) => [...prev, {
         sender: "bot",
-        text: responseData?.config?.nodeType === "buttons"
-          ? "Please select an option:"
-          : responseData.response,
+        text: responseData?.config?.nodeType === "buttons" ? "Please select an option:" : responseData.response,
         node: responseData,
         time: new Date(),
       }]);
     }
   }, []);
 
+  /* ── Build & activate a STOMP client for the given profile ────────────── */
+  const buildClient = useCallback((profileKey) => {
+    const profile = PROFILES[profileKey];
+
+    const client = new Client({
+      webSocketFactory: () => new WebSocket(profile.wsUrl),
+      reconnectDelay: 5000,
+      debug: () => {},
+      connectHeaders: { "X-API-Key": profile.wsApiKey },
+
+      onConnect: () => {
+        setConnected(true);
+        const existingSessionId = sessionIdRef.current;
+
+        if (existingSessionId) {
+          client.subscribe(`/topic/chat/${existingSessionId}`, handleTopicMessage);
+          client.publish({ destination: "/app/chat.reconnect", body: JSON.stringify({ sessionId: existingSessionId }) });
+          setChat((prev) => [...prev, { sender: "system", text: "🔄 Reconnected to server", time: new Date() }]);
+        } else {
+          client.subscribe("/app/chat.init", (response) => {
+            const data = JSON.parse(response.body);
+            setSessionId(data.sessionId);
+            sessionIdRef.current = data.sessionId;
+            client.subscribe(`/topic/chat/${data.sessionId}`, handleTopicMessage);
+
+            if (data.workflows?.length > 0) {
+              const node = {
+                workflowsNode: true,
+                node: { ...data.workflows[0], config: { nodeType: "buttons" } },
+                buttons: data.workflows,
+              };
+              setCurrentNode(node);
+              workflowsNodeRef.current = node;
+              setChat([{ sender: "bot", text: "👋 Hi! I'm your assistant. Please select a workflow to get started:", node, time: new Date() }]);
+            }
+          });
+          client.publish({ destination: "/app/chat.init", body: "{}" });
+        }
+      },
+
+      onDisconnect: () => setConnected(false),
+      onStompError:  () => setConnected(false),
+    });
+
+    client.activate();
+    setStompClient(client);
+    stompClientRef.current = client;
+    return client;
+  }, [handleTopicMessage]);
+
+  /* ── Mount: connect with the default profile ──────────────────────────── */
+  useEffect(() => {
+    const client = buildClient(activeProfile);
+    return () => client.deactivate();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ── Switch profile ────────────────────────────────────────────────────── */
+  const switchProfile = useCallback((profileKey) => {
+    if (profileKey === activeProfile) { setShowProfileMenu(false); return; }
+
+    stompClientRef.current?.deactivate();
+
+    // Reset all state
+    setConnected(false);
+    setChat([]);
+    setCurrentNode(null);
+    setSessionId(null);
+    sessionIdRef.current    = null;
+    workflowsNodeRef.current = null;
+    setCompleted(false);
+    setCanGoBack(false);
+    setWorkflowStarted(false);
+    setIsTyping(false);
+    setMessage("");
+    setActiveProfile(profileKey);
+    setShowProfileMenu(false);
+
+    setTimeout(() => buildClient(profileKey), 50);
+  }, [activeProfile, buildClient]);
+
   /* ── Auto-scroll ───────────────────────────────────────────────────────── */
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat, isTyping]);
 
+  /* ── Close profile menu on outside click ──────────────────────────────── */
+  useEffect(() => {
+    if (!showProfileMenu) return;
+    const handler = () => setShowProfileMenu(false);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [showProfileMenu]);
+
   /* ── Send helpers ──────────────────────────────────────────────────────── */
-  const sendMessage = useCallback(
-    (value) => {
-      if (!stompClient?.connected || !sessionIdRef.current) return;
-      setIsTyping(true);
-      stompClient.publish({
-        destination: "/app/chat.message",
-        body: JSON.stringify({
-          sessionId: currentNodeRef.current?.sessionId || sessionIdRef.current,
-          message: value,
-        }),
-      });
-    },
-    [stompClient]
-  );
+  const sendMessage = useCallback((value) => {
+    if (!stompClient?.connected || !sessionIdRef.current) return;
+    setIsTyping(true);
+    stompClient.publish({
+      destination: "/app/chat.message",
+      body: JSON.stringify({ sessionId: currentNodeRef.current?.sessionId || sessionIdRef.current, message: value }),
+    });
+  }, [stompClient]);
 
   const handleSend = () => {
     if (!message.trim() || completed) return;
     const text         = message.trim();
     const variableName = currentNode?.node?.config?.variableName || null;
-
     setChat((prev) => [...prev, { sender: "user", text, time: new Date() }]);
     setCanGoBack(true);
-
     if (!stompClient?.connected || !sessionIdRef.current) return;
     setIsTyping(true);
     stompClient.publish({
       destination: "/app/chat.message",
-      body: JSON.stringify({
-        sessionId: currentNodeRef.current?.sessionId || sessionIdRef.current,
-        message: text,
-        variableName,
-      }),
+      body: JSON.stringify({ sessionId: currentNodeRef.current?.sessionId || sessionIdRef.current, message: text, variableName }),
     });
     setMessage("");
     inputRef.current?.focus();
@@ -223,10 +254,7 @@ export default function ChatBot() {
     setCanGoBack(false);
     setIsTyping(true);
     setChat((prev) => [...prev, { sender: "system", text: "🔄 Restarting workflow…", time: new Date() }]);
-    stompClient.publish({
-      destination: "/app/chat.restart",
-      body: JSON.stringify({ sessionId: sessionIdRef.current }),
-    });
+    stompClient.publish({ destination: "/app/chat.restart", body: JSON.stringify({ sessionId: sessionIdRef.current }) });
   };
 
   const handleOptionClick = (value) => {
@@ -238,7 +266,7 @@ export default function ChatBot() {
   const handleWorkflowClick = (workflow) => {
     if (!stompClient?.connected || !sessionIdRef.current) return;
     setIsTyping(true);
-    setWorkflowStarted(true); // user is now inside a workflow
+    setWorkflowStarted(true);
     stompClient.publish({
       destination: "/app/chat.start",
       body: JSON.stringify({ sessionId: sessionIdRef.current, workflowId: workflow.id }),
@@ -247,12 +275,10 @@ export default function ChatBot() {
     setCanGoBack(true);
   };
 
-  // ── Main Menu: drop session, re-init from scratch ───────────────────────
   const handleMainMenu = () => {
     const client = stompClientRef.current;
     if (!client?.connected) return;
 
-    // 1. Clear all UI state
     setCompleted(false);
     setCanGoBack(false);
     setWorkflowStarted(false);
@@ -260,22 +286,16 @@ export default function ChatBot() {
     setMessage("");
     setChat([]);
     setCurrentNode(null);
-
-    // 2. Drop the old session so the backend starts fresh
-    sessionIdRef.current = null;
+    sessionIdRef.current    = null;
     setSessionId(null);
     workflowsNodeRef.current = null;
 
-    // 3. Re-subscribe to chat.init and request a new session + workflow list
     client.subscribe("/app/chat.init", (response) => {
       const data = JSON.parse(response.body);
       setSessionId(data.sessionId);
       sessionIdRef.current = data.sessionId;
-
-      // Subscribe to the new session topic
       client.subscribe(`/topic/chat/${data.sessionId}`, handleTopicMessage);
 
-      // Show workflow list
       if (data.workflows?.length > 0) {
         const node = {
           workflowsNode: true,
@@ -284,15 +304,9 @@ export default function ChatBot() {
         };
         setCurrentNode(node);
         workflowsNodeRef.current = node;
-        setChat([{
-          sender: "bot",
-          text: "👋 Hi! I'm your assistant. Please select a workflow to get started:",
-          node,
-          time: new Date(),
-        }]);
+        setChat([{ sender: "bot", text: "👋 Hi! I'm your assistant. Please select a workflow to get started:", node, time: new Date() }]);
       }
     });
-
     client.publish({ destination: "/app/chat.init", body: "{}" });
   };
 
@@ -300,8 +314,9 @@ export default function ChatBot() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  /* ── Input visibility ──────────────────────────────────────────────────── */
-  const showInput = !completed && currentNode?.node?.config?.nodeType === "input";
+  /* ── Derived ───────────────────────────────────────────────────────────── */
+  const profile          = PROFILES[activeProfile];
+  const showInput        = !completed && currentNode?.node?.config?.nodeType === "input";
   const inputPlaceholder = currentNode?.node?.name || "Type your message…";
 
   /* ── Render ────────────────────────────────────────────────────────────── */
@@ -321,13 +336,48 @@ export default function ChatBot() {
               </span>
             </div>
           </div>
+
+          {/* Profile selector */}
+          <div
+            className="cb-profile-selector"
+            onClick={(e) => { e.stopPropagation(); setShowProfileMenu((v) => !v); }}
+            role="button"
+            aria-haspopup="listbox"
+            aria-expanded={showProfileMenu}
+            aria-label={`Environment: ${profile.label}`}
+            tabIndex={0}
+            onKeyDown={(e) => e.key === "Enter" && setShowProfileMenu((v) => !v)}
+          >
+            <span className="cb-profile-badge" style={{ background: profile.color }}>
+              {profile.badge}
+            </span>
+            {/* <span className="cb-profile-chevron">▾</span> */}
+
+            {/* {showProfileMenu && (
+              <div className="cb-profile-menu" role="listbox">
+                {Object.entries(PROFILES).map(([key, p]) => (
+                  <button
+                    key={key}
+                    role="option"
+                    aria-selected={key === activeProfile}
+                    className={`cb-profile-item ${key === activeProfile ? "active" : ""}`}
+                    onClick={(e) => { e.stopPropagation(); switchProfile(key); }}
+                  >
+                    <span className="cb-profile-dot" style={{ background: p.color }} />
+                    {p.label}
+                    {key === activeProfile && <span className="cb-profile-check">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )} */}
+          </div>
         </div>
 
         {/* Connecting banner */}
         {!connected && (
           <div className="cb-connecting">
             <div className="cb-connecting-spinner" />
-            Connecting to server…
+            Connecting to {profile.label} server…
           </div>
         )}
 
@@ -385,9 +435,7 @@ export default function ChatBot() {
                   <button className="cb-back-btn" onClick={handleGoBack} disabled={!connected}>⬅ Back</button>
                 )}
                 {workflowStarted && (
-                  <button className="cb-restart-btn" onClick={handleRestart} disabled={!connected}>
-                    🔄 Restart
-                  </button>
+                  <button className="cb-restart-btn" onClick={handleRestart} disabled={!connected}>🔄 Restart</button>
                 )}
                 {workflowStarted && (
                   <button className="cb-main-menu-btn" onClick={handleMainMenu}>🏠 Main Menu</button>
@@ -401,19 +449,13 @@ export default function ChatBot() {
                 <button className="cb-back-btn" onClick={handleGoBack} disabled={!connected}>⬅ Back</button>
               )}
               {workflowStarted && (
-                <button className="cb-restart-btn" onClick={handleRestart} disabled={!connected}>
-                  🔄 Restart
-                </button>
+                <button className="cb-restart-btn" onClick={handleRestart} disabled={!connected}>🔄 Restart</button>
               )}
               {workflowStarted && (
                 <button className="cb-main-menu-btn" onClick={handleMainMenu}>🏠 Main Menu</button>
               )}
               <p className="cb-input-hint" style={{ margin: 0 }}>
-                {completed
-                  ? "Workflow finished"
-                  : connected
-                  ? "Select an option above to continue"
-                  : "Waiting for connection…"}
+                {completed ? "Workflow finished" : connected ? "Select an option above to continue" : "Waiting for connection…"}
               </p>
             </div>
           )}
@@ -443,8 +485,8 @@ function TypingIndicator() {
 }
 
 function MessageRow({ msg, disabled, onOptionClick, onWorkflowClick }) {
-  const isUser   = msg.sender === "user";
-  const isSystem = msg.sender === "system";
+  const isUser     = msg.sender === "user";
+  const isSystem   = msg.sender === "system";
   const hasButtons = msg.sender === "bot" &&
     (msg.node?.node?.config?.nodeType === "buttons" || msg.node?.node?.config?.apiType === "buttons");
 

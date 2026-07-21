@@ -254,3 +254,82 @@
 .cb-options-disabled { opacity: 0.5; pointer-events: none; }
 .cb-options-disabled .cb-option-btn { cursor: not-allowed; border-color: #cbd5e1; color: #94a3b8; background: #f8fafc; }
 .cb-options-disabled .cb-option-btn:hover { background: #f8fafc; color: #94a3b8; border-color: #cbd5e1; transform: none; box-shadow: none; }
+
+/* ─── Profile Selector ───────────────────────────────────────────────────── */
+.cb-profile-selector {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  margin-left: auto;
+  user-select: none;
+}
+
+.cb-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.cb-profile-chevron {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.cb-profile-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  min-width: 130px;
+  z-index: 100;
+  animation: fadeIn 0.15s ease;
+}
+
+.cb-profile-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.cb-profile-item:hover { background: #f3f4f6; }
+
+.cb-profile-item.active {
+  background: #f0f4ff;
+  color: #4338ca;
+  font-weight: 600;
+}
+
+.cb-profile-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cb-profile-check {
+  margin-left: auto;
+  font-size: 12px;
+  color: #4338ca;
+}
